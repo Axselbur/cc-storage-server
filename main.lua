@@ -1,0 +1,391 @@
+--[[
+  ================================================================
+  CC Storage Server -- main.lua (компьютер у хранилищ)
+  ================================================================
+  Сканирует вольты (Create: Connected item vaults), шлёт содержимое
+  на сервер, гоняет логистику (упаковщики -> цель, буферный сундук ->
+  вольты) и выводит статус на внешний монитор.
+
+  УСТАНОВКА:
+    wget https://<app>.onrender.com/main.lua startup ; reboot
+
+  ТРЕБОВАНИЯ К СЕТИ:
+    - компьютер подключён к вольтам проводной сетью (wired modem) или
+      стоит вплотную к одному вольту;
+    - в CC-конфиге включён http (http.enabled = true);
+    - компьютер ходит на ПУБЛИЧНЫЙ адрес (https://...onrender.com),
+      127.0.0.1 для него -- сам Minecraft-сервер.
+  ================================================================
+]]
+
+-- ======================= SETTINGS =======================
+local CONFIG = {
+    -- Адрес сервера на Render.
+    server_url = "https://cc-storage-server.onrender.com",
+
+    -- Ключ устройства. ДОЛЖЕН совпадать с переменной DEVICE_KEY на
+    -- Render. Это НЕ пароль сайта -- только для API-запросов из игры.
+    device_key = "-77QIbhF2zXqjZgrhWeozH_ycB8pnTf2",
+
+    scan_interval = 20,      -- как часто сканировать вольты и слать на сервер, с
+    transfer_interval = 1,   -- период логистики, с
+    auto_discover_fallback = true,  -- искать вольты по маске, если в конфиге пусто
+
+    -- Fallback-значения на случай, если сервер не отдал конфиг.
+    fallback_vaults = {},
+    fallback_packagers = {},
+    fallback_packager_target = "",
+    fallback_buffer_chest = "",
+
+    use_monitor = true,
+    monitor_text_scale = 0.5,
+}
+-- ========================================================
+
+if not http then
+    printError("HTTP API is not available! Enable http in the CC config.")
+    return
+end
+
+-- ======================= HTTP =======================
+local function api_get(path)
+    local ok, response = pcall(http.get, CONFIG.server_url .. path,
+        { ["X-Device-Key"] = CONFIG.device_key })
+    if ok and response then
+        local body = response.readAll()
+        response.close()
+        if body then
+            local ok2, data = pcall(textutils.unserializeJSON, body)
+            if ok2 then
+                return data
+            end
+        end
+    end
+    return nil
+end
+
+local function api_post(path, payload)
+    local ok_json, body = pcall(textutils.serializeJSON, payload)
+    if not ok_json then
+        return false
+    end
+    local ok, response = pcall(http.post, CONFIG.server_url .. path, body, {
+        ["Content-Type"] = "application/json",
+        ["X-Device-Key"] = CONFIG.device_key,
+    })
+    if ok and response then
+        response.close()
+        return true
+    end
+    return false
+end
+
+-- ======================= КОНФИГ С СЕРВЕРА =======================
+local SERVER_CONFIG = {}
+
+local function fetch_server_config()
+    local cfg = api_get("/api/config")
+    if type(cfg) == "table" then
+        SERVER_CONFIG = cfg
+        return true
+    end
+    return false
+end
+
+local function cfg_vaults()
+    local v = SERVER_CONFIG.vaults
+    if type(v) == "table" and #v > 0 then return v end
+    return CONFIG.fallback_vaults or {}
+end
+
+local function cfg_packagers()
+    local v = SERVER_CONFIG.packagers
+    if type(v) == "table" and #v > 0 then return v end
+    return CONFIG.fallback_packagers or {}
+end
+
+local function cfg_packager_target()
+    local v = SERVER_CONFIG.packager_target
+    if type(v) == "string" and v ~= "" then return v end
+    return CONFIG.fallback_packager_target or ""
+end
+
+local function cfg_buffer_chest()
+    local v = SERVER_CONFIG.buffer_chest
+    if type(v) == "string" and v ~= "" then return v end
+    return CONFIG.fallback_buffer_chest or ""
+end
+
+-- ======================= ПЕРИФЕРИЯ =======================
+-- resolve_name: точное имя периферии, иначе сравнение без учёта
+-- регистра/разделителей (Create_Packager_1 ~ create:packager_1),
+-- иначе совпадение по хвостовому числу.
+local function normalize_name(s)
+    return string.lower(string.gsub(s, "[:%s_%-]", ""))
+end
+
+local function resolve_name(want)
+    local names = peripheral.getNames()
+    for _, n in ipairs(names) do
+        if n == want then return n end
+    end
+    local w = normalize_name(want)
+    for _, n in ipairs(names) do
+        if normalize_name(n) == w then return n end
+    end
+    local num = string.match(want, "(%d+)$")
+    if num then
+        for _, n in ipairs(names) do
+            if string.match(n, "(%d+)$") == num then return n end
+        end
+    end
+    return nil
+end
+
+local function get_inventory(name)
+    local n = resolve_name(name)
+    if not n then return nil end
+    local inv = peripheral.wrap(n)
+    if inv and inv.list then return inv end
+    return nil
+end
+
+-- discover_vaults: все периферии, похожие на вольты/силосы.
+local function is_vault_name(n)
+    return string.match(n, "^create:item_vault_%d+$") ~= nil
+        or string.match(n, "^create_connected:item_silo_%d+$") ~= nil
+end
+
+local function discover_vaults()
+    local out = {}
+    for _, n in ipairs(peripheral.getNames()) do
+        if is_vault_name(n) then
+            table.insert(out, n)
+        end
+    end
+    table.sort(out)
+    return out
+end
+
+-- scan_vault: содержимое одного вольта -> {id: count}
+local function scan_vault(inv)
+    local out = {}
+    local ok, list = pcall(inv.list)
+    if not ok then return nil end
+    for _, item in pairs(list) do
+        out[item.name] = (out[item.name] or 0) + item.count
+    end
+    return out
+end
+
+-- ======================= ЛОГИСТИКА =======================
+local function push_all(inv, target)
+    local moved = 0
+    local ok, list = pcall(inv.list)
+    if not ok then return 0 end
+    for slot, item in pairs(list) do
+        if item.count > 0 then
+            local okp, m = pcall(inv.pushItems, target, slot, item.count)
+            if okp and m and m > 0 then moved = moved + m end
+        end
+    end
+    return moved
+end
+
+local function logistics_pass(active_vaults)
+    local moved = 0
+
+    -- 1) каждый упаковщик -> packager_target
+    local target = cfg_packager_target()
+    if target ~= "" then
+        local tName = resolve_name(target) or target
+        for _, pname in ipairs(cfg_packagers()) do
+            local inv = get_inventory(pname)
+            if inv then
+                moved = moved + push_all(inv, tName)
+            end
+        end
+    end
+
+    -- 2) буферный сундук -> раздать по вольтам по слоту
+    local buf = get_inventory(cfg_buffer_chest())
+    if buf then
+        local ok, list = pcall(buf.list)
+        if ok then
+            for slot, item in pairs(list) do
+                local count = item.count
+                if count > 0 then
+                    for _, vname in ipairs(active_vaults) do
+                        local vN = resolve_name(vname) or vname
+                        local okp, m = pcall(buf.pushItems, vN, slot, count)
+                        if okp and m and m > 0 then
+                            count = count - m
+                            moved = moved + m
+                        end
+                        if count <= 0 then break end
+                    end
+                end
+            end
+        end
+    end
+
+    return moved
+end
+
+-- ======================= ОТПРАВКА НА СЕРВЕР =======================
+local function send_to_server(payload)
+    return api_post("/api/items", payload)
+end
+
+-- ======================= МОНИТОР =======================
+local monitor = nil
+
+local function setup_monitor()
+    if not CONFIG.use_monitor then
+        return false
+    end
+    local mName = nil
+    for _, n in ipairs(peripheral.getNames()) do
+        if peripheral.getType(n) == "monitor" then
+            mName = n
+            break
+        end
+    end
+    if not mName then
+        print("No monitor found (output on this screen)")
+        return false
+    end
+    print("Output -> external monitor")
+    monitor = peripheral.wrap(mName)
+    if monitor.setTextScale then
+        pcall(monitor.setTextScale, CONFIG.monitor_text_scale)
+    end
+    term.redirect(monitor)
+    return true
+end
+
+local function draw_status(found, totalVaults, kinds, total, logisticsStatus, serverLink, missing)
+    term.clear()
+    term.setCursorPos(1, 1)
+    print("== Storage Monitor ==")
+    print("Vaults: " .. tostring(found) .. "/" .. tostring(totalVaults))
+    print("Items: " .. tostring(kinds) .. " kinds, " .. tostring(total) .. " total")
+    print("Logistics: " .. tostring(logisticsStatus))
+    if serverLink then
+        print("SERVER LINK: OK")
+    else
+        print("NO SERVER CONNECTION!")
+    end
+    if #missing > 0 then
+        print("Missing: " .. table.concat(missing, ", "))
+    end
+end
+
+-- ======================= БАЛАНСИРОВКА (часть 8) =======================
+local function check_balance_job()
+    -- Заполняется в части 8: GET /api/balance -> если requested, запустить
+    -- перекладывание стаков между вольтами.
+    return false
+end
+
+-- ======================= ГЛАВНЫЙ ЦИКЛ =======================
+local function main()
+    term.clear()
+    term.setCursorPos(1, 1)
+    print("CC Storage Server: storage computer")
+    print("Server: " .. CONFIG.server_url)
+    setup_monitor()
+
+    local tick = 0
+    local active_vaults = {}
+    local server_ok = false
+    local kinds, total = 0, 0
+    local lastLogistics = "idle"
+    local missing = {}
+
+    while true do
+        tick = tick + 1
+
+        -- логистика раз в transfer_interval (каждый тик)
+        local okL, moved = pcall(logistics_pass, active_vaults)
+        lastLogistics = okL and (moved > 0 and ("moved " .. tostring(moved)) or "idle")
+            or "error"
+
+        -- полный цикл раз в scan_interval
+        if tick % CONFIG.scan_interval == 0 then
+            local okCycle, errCycle = pcall(function()
+                server_ok = fetch_server_config()
+                check_balance_job()
+
+                -- собрать список вольтов: конфиг + авто-обнаружение
+                local names = {}
+                for _, n in ipairs(cfg_vaults()) do
+                    table.insert(names, n)
+                end
+                if CONFIG.auto_discover_fallback then
+                    for _, n in ipairs(discover_vaults()) do
+                        local found = false
+                        for _, c in ipairs(names) do
+                            if c == n then found = true break end
+                        end
+                        if not found then table.insert(names, n) end
+                    end
+                end
+
+                -- сканирование
+                active_vaults = {}
+                missing = {}
+                local items = {}
+                local vaultData = {}
+                for _, name in ipairs(names) do
+                    local inv = get_inventory(name)
+                    if inv then
+                        local data = scan_vault(inv)
+                        if data then
+                            table.insert(active_vaults, name)
+                            vaultData[name] = data
+                            for id, cnt in pairs(data) do
+                                items[id] = (items[id] or 0) + cnt
+                            end
+                        else
+                            table.insert(missing, name)
+                        end
+                    else
+                        table.insert(missing, name)
+                    end
+                end
+
+                kinds = 0
+                total = 0
+                for _ in pairs(items) do kinds = kinds + 1 end
+                for _, cnt in pairs(items) do total = total + cnt end
+
+                -- отправить на сервер
+                local payload = {
+                    source = "computercraft",
+                    computer = os.computerID(),
+                    time = os.epoch("utc"),
+                    items = items,
+                    vaults = vaultData,
+                    missing = missing,
+                }
+                server_ok = send_to_server(payload)
+            end)
+            if not okCycle then
+                server_ok = false
+                print("Cycle error: " .. tostring(errCycle))
+            end
+
+            draw_status(#active_vaults, #cfg_vaults(), kinds, total,
+                lastLogistics, server_ok, missing)
+        end
+
+        os.sleep(CONFIG.transfer_interval)
+    end
+end
+
+local ok, err = pcall(main)
+if not ok then
+    term.redirect(term.native())
+    printError("Error: " .. tostring(err))
+end
