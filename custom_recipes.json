@@ -28,11 +28,11 @@
     "ingredients": [
       {
         "item": "minecraft:gold_ingot",
-        "count": 4
+        "count": 8
       },
       {
         "item": "minecraft:apple",
-        "count": 8
+        "count": 1
       }
     ],
     "auto_enabled": false,
