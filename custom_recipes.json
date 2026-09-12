@@ -60,7 +60,7 @@
         "count": 1
       }
     ],
-    "auto_enabled": false,
+    "auto_enabled": true,
     "auto_target": 64,
     "destination": "create_connected:item_silo_75"
   }
