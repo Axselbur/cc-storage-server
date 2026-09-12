@@ -61,5 +61,19 @@
     "destination": "create_connected:item_silo_75",
     "mechanism_input": "",
     "mechanism_output": ""
+  },
+  {
+    "id": "custom:1789218254683",
+    "output": "create:shaft",
+    "output_count": 8,
+    "method": "table",
+    "ingredients": [
+      {
+        "item": "create:andesite_alloy",
+        "count": 2
+      }
+    ],
+    "auto_enabled": true,
+    "auto_target": 192
   }
 ]
