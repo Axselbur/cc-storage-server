@@ -110,6 +110,9 @@ def _parse_ingredient(entry, default_count=1):
         return {"anyOf": options, "count": default_count} if options else None
     if isinstance(entry, dict):
         count = entry.get("count", default_count)
+        it = entry.get("item")
+        if isinstance(it, dict):
+            return {"id": it.get("id") or it.get("item"), "count": it.get("count", count)}
         if "item" in entry:
             return {"id": entry["item"], "count": count}
         if "id" in entry:
@@ -128,6 +131,21 @@ def _parse_ingredient(entry, default_count=1):
     return None
 
 
+def _parse_result_entry(r):
+    if not isinstance(r, dict):
+        return None
+    it = r.get("item")
+    cnt = r.get("count", 1)
+    if isinstance(it, dict):
+        rid = it.get("id") or it.get("item")
+        cnt = it.get("count", cnt)
+    else:
+        rid = it or r.get("id")
+    if not rid or not isinstance(rid, str):
+        return None
+    return {"id": rid, "count": cnt, "chance": r.get("chance")}
+
+
 def _parse_results(raw):
     out = []
     res = raw.get("result")
@@ -135,17 +153,13 @@ def _parse_results(raw):
         res = raw.get("results")
     if isinstance(res, list):
         for r in res:
-            if not isinstance(r, dict):
-                continue
-            rid = r.get("item") or r.get("id")
-            if rid:
-                out.append({"id": rid, "count": r.get("count", 1),
-                            "chance": r.get("chance")})
+            e = _parse_result_entry(r)
+            if e:
+                out.append(e)
     elif isinstance(res, dict):
-        rid = res.get("item") or res.get("id")
-        if rid:
-            out.append({"id": rid, "count": res.get("count", 1),
-                        "chance": res.get("chance")})
+        e = _parse_result_entry(res)
+        if e:
+            out.append(e)
     return out
 
 
@@ -176,10 +190,11 @@ def _parse_recipe(rid, raw):
     else:
         ing = raw.get("ingredients")
         if isinstance(ing, list):
-            cells = [c for c in (_parse_ingredient(e) for e in ing) if c]
+            # keep None positions -- they matter for shaped grids
+            cells = [_parse_ingredient(e) for e in ing]
             w = int(raw.get("width") or 0)
             h = int(raw.get("height") or 0)
-            if 0 < w <= 3 and 0 < h <= 3 and w * h >= len(cells):
+            if 0 < w <= 3 and 0 < h <= 3 and len(cells) >= w * h:
                 grid = []
                 idx = 0
                 for _ in range(h):
@@ -192,7 +207,7 @@ def _parse_recipe(rid, raw):
                     grid.append(line)
                 while len(grid) < 3:
                     grid.append([None, None, None])
-            inputs = cells
+            inputs = [c for c in cells if c is not None]
 
     recipe = {"id": rid, "type": rtype, "grid": grid, "inputs": inputs,
               "results": results}
@@ -440,7 +455,8 @@ def rebuild_custom_recipe_index():
 # (CraftingCalculation / CraftingTreeNode / CraftingTreeProcess /
 # CraftingSimulationState). Only workbench recipes are craftable -- the
 # turtle with a crafting table executes them.
-CRAFTABLE_TYPES = {"minecraft:crafting_shaped", "minecraft:crafting_shapeless"}
+CRAFTABLE_TYPES = {"minecraft:crafting_shaped", "minecraft:crafting_shapeless",
+                   "recipedump:shaped"}
 
 PLAN_MAX_OPS = 200000
 PLAN_MAX_DEPTH = 24
