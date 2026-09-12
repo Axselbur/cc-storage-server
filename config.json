@@ -1,8 +1,25 @@
 {
-  "vaults": [],
+  "vaults": [
+    "create_connected:item_silo_75",
+    "create_connected:item_silo_76",
+    "create_connected:item_silo_77",
+    "create_connected:item_silo_78",
+    "create_connected:item_silo_79",
+    "create_connected:item_silo_80",
+    "create_connected:item_silo_81",
+    "create_connected:item_silo_82",
+    "create_connected:item_silo_83",
+    "create_connected:item_silo_84",
+    "create_connected:item_silo_85",
+    "create_connected:item_silo_86",
+    "create_connected:item_silo_87",
+    "create_connected:item_silo_88",
+    "create_connected:item_silo_89",
+    "create_connected:item_silo_90"
+  ],
   "turtle_name": "",
   "packagers": [],
-  "packager_target": "",
+  "packager_target": "create_connected:item_silo_75",
   "buffer_chest": "",
   "auto_balance": true,
   "auto_balance_interval": 600
