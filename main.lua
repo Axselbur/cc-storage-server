@@ -285,6 +285,8 @@ end
 -- Один list() на вольт -> модель {total, slots}. Перекладываем самый
 -- большой стак, который влезает в разницу, из самого полного в самый
 -- пустой. Делить стаки нельзя; лимит 400 стаков за запуск.
+local active_vaults = {}
+
 local function balance_vaults()
     local model = {}
 
@@ -406,7 +408,6 @@ local function main()
     setup_monitor()
 
     local tick = 0
-    local active_vaults = {}
     local server_ok = false
     local kinds, total = 0, 0
     local lastLogistics = "idle"
