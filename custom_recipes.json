@@ -15,6 +15,9 @@
       }
     ],
     "auto_enabled": true,
-    "auto_target": 128
+    "auto_target": 128,
+    "destination": null,
+    "mechanism_input": "",
+    "mechanism_output": ""
   }
 ]
