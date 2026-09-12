@@ -14,5 +14,21 @@
         "count": 1
       }
     ]
+  },
+  {
+    "id": "custom:1789176507778",
+    "output": "create:cogwheel",
+    "output_count": 1,
+    "method": "table",
+    "ingredients": [
+      {
+        "item": "minecraft:oak_planks",
+        "count": 1
+      },
+      {
+        "item": "create:shaft",
+        "count": 128
+      }
+    ]
   }
 ]
