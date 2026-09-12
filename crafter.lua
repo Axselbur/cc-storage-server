@@ -458,19 +458,28 @@ local function craft_step_table(step)
         for k = 1, #gridOrder do
             if k > 1 then
                 relocate_slots(GRID_MODES[gridOrder[1]].slots, GRID_MODES[gridOrder[k]].slots)
+                print("  layout " .. tostring(gridOrder[1]) .. " failed, trying " .. tostring(gridOrder[k]))
             end
             turtle.select(1)
             if turtle.craft(runs) then
                 crafted = true
                 if k > 1 then
                     gridOrder = { gridOrder[k], gridOrder[1] }
-                    print("grid mode switched")
+                    print("  grid layout switched")
                 end
                 break
             end
         end
         if not crafted then
-            error("turtle.craft failed")
+            -- показать, что лежало в сетке, для диагностики
+            local desc = {}
+            for i = 1, 9 do
+                local gid = cells[i]
+                if gid then
+                    desc[#desc + 1] = tostring(i) .. ":" .. tostring(gid)
+                end
+            end
+            error("turtle.craft failed (cells: " .. table.concat(desc, " ") .. ")")
         end
 
         -- 5) результат -> вольты
