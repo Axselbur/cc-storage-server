@@ -34,12 +34,22 @@ local CONFIG = {
     monitor_text_scale = 0.5,
 
     -- Раскладка сетки крафта в инвентаре черепашки:
-    -- "linear" -- слоты 1-9 подряд (старые версии CC): 1,2,3 / 4,5,6 / 7,8,9
-    -- "corner" -- угол 4x4-инвентаря (CC:Tweaked): 1,2,3 / 5,6,7 / 9,10,11
-    grid_mode = "linear",
+    -- "corner" -- угол 4x4-инвентаря: 1,2,3 / 5,6,7 / 9,10,11
+    -- "linear" -- слоты 1-9 подряд (старые версии CC)
+    -- Это лишь порядок попытки: если крафт не прошёл, черепашка сама
+    -- переложит предметы в другую раскладку и попробует снова.
+    grid_mode = "corner",
 }
 -- ========================================================
 
+if not turtle then
+    printError("This program must run on a TURTLE.")
+    return
+end
+if not turtle.craft then
+    printError("The turtle needs a CRAFTING TABLE attached!")
+    return
+end
 if not http then
     printError("HTTP API is not available! Enable http in the CC config.")
     return
@@ -372,10 +382,10 @@ local GRID_MODES = {
     { slots = { 1, 2, 3, 4, 5, 6, 7, 8, 9 } },     -- linear (старые CC)
 }
 local gridOrder
-if CONFIG.grid_mode == "corner" then
-    gridOrder = { 1, 2 }
-else
+if CONFIG.grid_mode == "linear" then
     gridOrder = { 2, 1 }
+else
+    gridOrder = { 1, 2 }
 end
 
 local function relocate_slots(fromSlots, toSlots)
@@ -556,9 +566,29 @@ local function craft_step_mechanism(step)
 end
 
 -- ======================= ИСПОЛНЕНИЕ ЗАКАЗА =======================
+local function count_item(id)
+    local total = 0
+    for s = 1, 16 do
+        local d = turtle.getItemDetail(s)
+        if d and d.name == id then
+            total = total + d.count
+        end
+    end
+    return total
+end
+
 local function step_ready(step)
-    for _, ing in ipairs(step.ingredients or {}) do
-        if (stock[ing.id] or 0) < ing.count then return false end
+    local ings = step.ingredients
+    if not ings or #ings == 0 then
+        return true
+    end
+    for _, ing in ipairs(ings) do
+        if ing.id and ing.count and ing.count > 0 then
+            local have = (stock[ing.id] or 0) + count_item(ing.id)
+            if have < ing.count then
+                return false
+            end
+        end
     end
     return true
 end
