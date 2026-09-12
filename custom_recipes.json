@@ -70,10 +70,17 @@
     "ingredients": [
       {
         "item": "create:andesite_alloy",
-        "count": 2
+        "count": 1
+      },
+      {
+        "item": "create:zinc_ingot",
+        "count": 1
       }
     ],
     "auto_enabled": true,
-    "auto_target": 192
+    "auto_target": 192,
+    "destination": null,
+    "mechanism_input": "",
+    "mechanism_output": ""
   }
 ]
