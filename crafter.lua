@@ -32,6 +32,11 @@ local CONFIG = {
 
     use_monitor = true,
     monitor_text_scale = 0.5,
+
+    -- Раскладка сетки крафта в инвентаре черепашки:
+    -- "linear" -- слоты 1-9 подряд (старые версии CC): 1,2,3 / 4,5,6 / 7,8,9
+    -- "corner" -- угол 4x4-инвентаря (CC:Tweaked): 1,2,3 / 5,6,7 / 9,10,11
+    grid_mode = "linear",
 }
 -- ========================================================
 
@@ -359,14 +364,20 @@ local function push_all_turtle_to(target)
 end
 
 -- ======================= КРАФТ НА ВЕРСТАКЕ =======================
--- Сетка крафта в инвентаре черепашки (4x4): 1,2,3 / 5,6,7 / 9,10,11.
-local GRID_SLOTS = { 1, 2, 3, 5, 6, 7, 9, 10, 11 }
+-- Раскладка сетки зависит от версии CC (см. CONFIG.grid_mode).
+local GRID_SLOTS
+if CONFIG.grid_mode == "corner" then
+    GRID_SLOTS = { 1, 2, 3, 5, 6, 7, 9, 10, 11 }
+else
+    GRID_SLOTS = { 1, 2, 3, 4, 5, 6, 7, 8, 9 }
+end
 
 local function craft_step_table(step)
     local remaining = step.batches or 1
     local per_craft = (step.count or 0) / (step.batches or 1)
 
-    -- какие предметы класть в сетку (на 1 крафт)
+    -- какие предметы класть в сетку (на 1 крафт).
+    -- ВАЖНО: для form-рецептов позиции пустых ячеек сохраняются!
     local cells = {}
     if step.shapeless then
         for _, ing in ipairs(step.ingredients or {}) do
@@ -378,10 +389,14 @@ local function craft_step_table(step)
     else
         local grid = step.grid or {}
         for i = 1, 9 do
-            if grid[i] then table.insert(cells, grid[i]) end
+            cells[i] = grid[i]
         end
     end
-    if #cells == 0 then error("empty grid") end
+    local hasAny = false
+    for i = 1, 9 do
+        if cells[i] then hasAny = true break end
+    end
+    if not hasAny then error("empty grid") end
 
     while remaining > 0 do
         -- 1) черепашка пустая, иначе turtle.craft не пройдёт
@@ -394,17 +409,16 @@ local function craft_step_table(step)
         want = math.min(want, math.floor(7 * 64 / per_craft))
         if want < 1 then want = 1 end
 
-        -- 3) набрать предметы прямо в слоты сетки
+        -- 3) набрать предметы прямо в слоты сетки (позиции сохранены)
         local slotMap = {}
-        local idx = 1
-        for _, gid in ipairs(cells) do
-            if idx > 9 then error("too many cells") end
-            local cur = pull_into_slot(gid, GRID_SLOTS[idx], want)
-            slotMap[idx] = cur
-            idx = idx + 1
+        for i = 1, 9 do
+            local gid = cells[i]
+            if gid then
+                slotMap[i] = pull_into_slot(gid, GRID_SLOTS[i], want)
+            end
         end
         local runs = want
-        for _, c in ipairs(slotMap) do runs = math.min(runs, c) end
+        for _, c in pairs(slotMap) do runs = math.min(runs, c) end
         if runs < 1 then
             error("not enough in storage")
         end
