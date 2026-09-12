@@ -364,12 +364,32 @@ local function push_all_turtle_to(target)
 end
 
 -- ======================= КРАФТ НА ВЕРСТАКЕ =======================
--- Раскладка сетки зависит от версии CC (см. CONFIG.grid_mode).
-local GRID_SLOTS
+-- Раскладка сетки зависит от версии CC (см. CONFIG.grid_mode), поэтому
+-- крафт САМ ПОДБИРАЕТ раскладку: пробует предпочтительную, при неудаче
+-- перекладывает предметы в альтернативную и пробует снова.
+local GRID_MODES = {
+    { slots = { 1, 2, 3, 5, 6, 7, 9, 10, 11 } },  -- corner (CC:Tweaked)
+    { slots = { 1, 2, 3, 4, 5, 6, 7, 8, 9 } },     -- linear (старые CC)
+}
+local gridOrder
 if CONFIG.grid_mode == "corner" then
-    GRID_SLOTS = { 1, 2, 3, 5, 6, 7, 9, 10, 11 }
+    gridOrder = { 1, 2 }
 else
-    GRID_SLOTS = { 1, 2, 3, 4, 5, 6, 7, 8, 9 }
+    gridOrder = { 2, 1 }
+end
+
+local function relocate_slots(fromSlots, toSlots)
+    for i = 1, 9 do
+        local from = fromSlots[i]
+        local to = toSlots[i]
+        if from ~= to then
+            local count = turtle.getItemCount(from)
+            if count > 0 then
+                turtle.select(from)
+                turtle.transferTo(to, count)
+            end
+        end
+    end
 end
 
 local function craft_step_table(step)
@@ -409,12 +429,12 @@ local function craft_step_table(step)
         want = math.min(want, math.floor(7 * 64 / per_craft))
         if want < 1 then want = 1 end
 
-        -- 3) набрать предметы прямо в слоты сетки (позиции сохранены)
+        -- 3) набрать предметы в предпочтительную раскладку сетки
         local slotMap = {}
         for i = 1, 9 do
             local gid = cells[i]
             if gid then
-                slotMap[i] = pull_into_slot(gid, GRID_SLOTS[i], want)
+                slotMap[i] = pull_into_slot(gid, GRID_MODES[gridOrder[1]].slots[i], want)
             end
         end
         local runs = want
@@ -423,9 +443,23 @@ local function craft_step_table(step)
             error("not enough in storage")
         end
 
-        -- 4) крафт
-        turtle.select(1)
-        if not turtle.craft(runs) then
+        -- 4) крафт; если раскладка не подошла -- пробуем альтернативную
+        local crafted = false
+        for k = 1, #gridOrder do
+            if k > 1 then
+                relocate_slots(GRID_MODES[gridOrder[1]].slots, GRID_MODES[gridOrder[k]].slots)
+            end
+            turtle.select(1)
+            if turtle.craft(runs) then
+                crafted = true
+                if k > 1 then
+                    gridOrder = { gridOrder[k], gridOrder[1] }
+                    print("grid mode switched")
+                end
+                break
+            end
+        end
+        if not crafted then
             error("turtle.craft failed")
         end
 
