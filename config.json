@@ -4,6 +4,6 @@
   "packagers": [],
   "packager_target": "",
   "buffer_chest": "",
-  "auto_balance": false,
-  "auto_balance_interval": 300
+  "auto_balance": true,
+  "auto_balance_interval": 600
 }
