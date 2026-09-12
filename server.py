@@ -36,6 +36,8 @@ CONFIG_DEFAULTS = {
     "packagers": [],         # packager peripherals
     "packager_target": "",   # where packagers push into
     "buffer_chest": "",      # buffer chest to distribute into vaults
+    "auto_balance": True,    # keep vaults evenly filled automatically
+    "auto_balance_interval": 600,  # seconds between auto-balance runs
 }
 
 LOCK = threading.RLock()
@@ -922,6 +924,61 @@ def heal_orders():
             save_orders()
 
 
+# ---------------- auto-maintain (автоподдержание) ----------------
+AUTO_MAINTENANCE_INTERVAL = 30.0
+
+
+def _auto_maintain_tick():
+    with LOCK:
+        stock = dict(STATE.get("items", {}))
+        orders = list(ORDERS)
+        customs = list(CUSTOM_RECIPES)
+    for cr in customs:
+        if not cr.get("auto_enabled"):
+            continue
+        try:
+            target = int(cr.get("auto_target") or 0)
+        except (TypeError, ValueError):
+            target = 0
+        item = cr.get("output")
+        if target <= 0 or not item:
+            continue
+        have = stock.get(item, 0)
+        if have >= target:
+            continue
+        if any(o.get("item") == item and o.get("status") in ("queued", "crafting")
+               for o in orders):
+            continue  # уже докрафчиваем
+        need = target - have
+        res = _replan_order(item, need)
+        if res is None:
+            continue
+        steps, missing, planned, status = res
+        if planned <= 0:
+            continue
+        with LOCK:
+            oid = _next_order_id()
+            order = {
+                "id": oid, "item": item, "count": planned,
+                "status": "queued", "steps": steps, "missing": missing,
+                "planned": planned, "step_done": 0, "error": None,
+                "created_at": time.time(),
+            }
+            ORDERS.insert(0, order)
+            del ORDERS[MAX_ORDERS:]
+            save_orders()
+        log("auto-maintain: order #%d %s x%d" % (oid, item, planned))
+
+
+def auto_maintain_loop():
+    while True:
+        time.sleep(AUTO_MAINTENANCE_INTERVAL)
+        try:
+            _auto_maintain_tick()
+        except Exception as e:
+            log("auto-maintain error: %s" % e)
+
+
 # ---------------- http ----------------
 class Handler(BaseHTTPRequestHandler):
     server_version = "CCStorage/1.0"
@@ -1173,9 +1230,17 @@ class Handler(BaseHTTPRequestHandler):
                         if k not in data:
                             continue
                         v = data[k]
-                        if isinstance(CONFIG_DEFAULTS[k], list):
+                        default = CONFIG_DEFAULTS[k]
+                        if isinstance(default, list):
                             CONFIG[k] = [str(x).strip() for x in v
                                          if str(x).strip()] if isinstance(v, list) else []
+                        elif isinstance(default, bool):
+                            CONFIG[k] = bool(v)
+                        elif isinstance(default, int):
+                            try:
+                                CONFIG[k] = max(0, int(v))
+                            except (TypeError, ValueError):
+                                CONFIG[k] = default
                         else:
                             CONFIG[k] = str(v).strip()
                     save_config()
@@ -1223,6 +1288,61 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(data, dict):
             self._json(400, {"error": "bad json"})
             return
+
+        def parse_ingredients(raw):
+            out = []
+            for ing in raw or []:
+                if isinstance(ing, dict) and ing.get("item"):
+                    try:
+                        cnt = max(1, int(ing.get("count", 1)))
+                    except (TypeError, ValueError):
+                        cnt = 1
+                    out.append({"item": str(ing["item"]).strip(), "count": cnt})
+            return out
+
+        rid = str(data.get("id") or "").strip()
+
+        # ---------- update existing ----------
+        if rid:
+            with LOCK:
+                target = None
+                for c in CUSTOM_RECIPES:
+                    if c.get("id") == rid:
+                        target = c
+                        break
+                if target is None:
+                    self._json(404, {"error": "not found"})
+                    return
+                if "output" in data:
+                    target["output"] = str(data["output"]).strip()
+                if "output_count" in data:
+                    try:
+                        target["output_count"] = max(1, int(data["output_count"]))
+                    except (TypeError, ValueError):
+                        pass
+                if "method" in data and data["method"] in ("table", "mechanism"):
+                    target["method"] = data["method"]
+                if "ingredients" in data:
+                    target["ingredients"] = parse_ingredients(data["ingredients"])
+                if "destination" in data:
+                    target["destination"] = str(data["destination"]).strip() or None
+                if "mechanism_input" in data:
+                    target["mechanism_input"] = str(data["mechanism_input"]).strip()
+                if "mechanism_output" in data:
+                    target["mechanism_output"] = str(data["mechanism_output"]).strip()
+                if "auto_enabled" in data:
+                    target["auto_enabled"] = bool(data["auto_enabled"])
+                if "auto_target" in data:
+                    try:
+                        target["auto_target"] = max(0, int(data["auto_target"]))
+                    except (TypeError, ValueError):
+                        target["auto_target"] = 0
+                save_custom_recipes()
+                rebuild_custom_recipe_index()
+                self._json(200, {"ok": True, "recipe": target})
+            return
+
+        # ---------- create new ----------
         output = str(data.get("output") or "").strip()
         method = data.get("method", "table")
         if method not in ("table", "mechanism"):
@@ -1231,14 +1351,7 @@ class Handler(BaseHTTPRequestHandler):
             output_count = max(1, int(data.get("output_count", 1)))
         except (TypeError, ValueError):
             output_count = 1
-        ingredients = []
-        for ing in data.get("ingredients") or []:
-            if isinstance(ing, dict) and ing.get("item"):
-                try:
-                    cnt = max(1, int(ing.get("count", 1)))
-                except (TypeError, ValueError):
-                    cnt = 1
-                ingredients.append({"item": str(ing["item"]).strip(), "count": cnt})
+        ingredients = parse_ingredients(data.get("ingredients"))
         if not output:
             self._json(400, {"error": "need output"})
             return
@@ -1251,6 +1364,8 @@ class Handler(BaseHTTPRequestHandler):
             "output_count": output_count,
             "method": method,
             "ingredients": ingredients,
+            "auto_enabled": bool(data.get("auto_enabled", False)),
+            "auto_target": max(0, int(data.get("auto_target") or 0) if data.get("auto_target") else 0),
         }
         if data.get("destination"):
             cr["destination"] = str(data["destination"]).strip()
@@ -1375,6 +1490,7 @@ def main():
     log("Access control: %s" % ("ON" if ADMIN_PASSWORD else "OFF (site is open)"))
     log("GitHub sync: %s" % ("ON (%s @ %s)" % (GITHUB_REPO, GITHUB_BRANCH)
                               if GITHUB_TOKEN and GITHUB_REPO else "OFF"))
+    threading.Thread(target=auto_maintain_loop, daemon=True).start()
     log("Config: %s" % json.dumps(CONFIG, ensure_ascii=False))
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     log("Listening on http://%s:%d" % (HOST, PORT))

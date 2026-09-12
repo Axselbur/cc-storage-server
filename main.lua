@@ -36,6 +36,8 @@ local CONFIG = {
     fallback_packagers = {},
     fallback_packager_target = "",
     fallback_buffer_chest = "",
+    fallback_auto_balance = true,
+    fallback_auto_balance_interval = 600,
 
     use_monitor = true,
     monitor_text_scale = 0.5,
@@ -114,6 +116,18 @@ local function cfg_buffer_chest()
     local v = SERVER_CONFIG.buffer_chest
     if type(v) == "string" and v ~= "" then return v end
     return CONFIG.fallback_buffer_chest or ""
+end
+
+local function cfg_auto_balance()
+    local v = SERVER_CONFIG.auto_balance
+    if type(v) == "boolean" then return v end
+    return CONFIG.fallback_auto_balance
+end
+
+local function cfg_auto_balance_interval()
+    local v = SERVER_CONFIG.auto_balance_interval
+    if type(v) == "number" and v > 0 then return v end
+    return CONFIG.fallback_auto_balance_interval
 end
 
 -- ======================= ПЕРИФЕРИЯ =======================
@@ -418,6 +432,7 @@ local function main()
     local kinds, total = 0, 0
     local lastLogistics = "idle"
     local missing = {}
+    local lastAutoBalance = os.epoch("utc")
 
     while true do
         tick = tick + 1
@@ -432,6 +447,24 @@ local function main()
             local okCycle, errCycle = pcall(function()
                 server_ok = fetch_server_config()
                 check_balance_job()
+
+                -- автобалансировка: держим вольты заполненными равномерно
+                local nowMs = os.epoch("utc")
+                if cfg_auto_balance() and
+                   (nowMs - lastAutoBalance) > cfg_auto_balance_interval() * 1000 then
+                    lastAutoBalance = nowMs
+                    api_post("/api/balance/progress",
+                        { status = "running", moved = 0, message = "автобалансировка" })
+                    local okB, errB = pcall(function()
+                        local stB, mvB = balance_vaults()
+                        api_post("/api/balance/progress",
+                            { status = stB, moved = mvB, message = "автобалансировка" })
+                    end)
+                    if not okB then
+                        api_post("/api/balance/progress",
+                            { status = "failed", moved = 0, message = tostring(errB) })
+                    end
+                end
 
                 -- собрать список вольтов: конфиг + авто-обнаружение
                 local names = {}

@@ -271,6 +271,9 @@ header {
 .cm-ing input.cnt { width: 70px; }
 .inghint { color: var(--muted); font-size: 11px; margin: 6px 0; }
 .dropactive { border-color: var(--gold) !important; background: rgba(230, 195, 92, 0.08); }
+.cmcontrols { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.cmcontrols input[type=number] { width: 80px; }
+.cmcontrols label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
 </style>
 </head>
 <body>
@@ -397,6 +400,14 @@ header {
       <input type="text" id="cfgBufferChest" placeholder="">
     </div>
 
+    <div class="sfield">
+      <label><input type="checkbox" id="cfgAutoBalance"> Автобалансировка вольтов (держать заполнение равномерным)</label>
+    </div>
+    <div class="sfield">
+      <label>Интервал автобалансировки (сек)</label>
+      <input type="number" id="cfgAutoBalanceInterval" min="60" value="600" style="width:140px;">
+    </div>
+
     <button id="btnSaveConfig">Сохранить</button>
     <div id="cfgMsg" class="muted" style="margin-top:8px;min-height:14px;font-size:12px;"></div>
   </div>
@@ -441,6 +452,16 @@ header {
     <div class="sfield">
       <label>Положить готовый предмет в (необязательно)</label>
       <input type="text" id="cmDestination" placeholder="пусто = любой свободный вольт">
+    </div>
+    <div class="sfield">
+      <label>Автоподдержание запаса</label>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input type="checkbox" id="cmAutoEnabled">
+        <span style="font-size:12px;">держать на складе</span>
+        <input type="number" id="cmAutoTarget" min="0" value="64" style="width:110px;">
+        <span style="font-size:12px;">шт.</span>
+      </div>
+      <div class="inghint">Сервер сам будет заказывать докрафт, когда запаса станет меньше.</div>
     </div>
     <div class="sfield">
       <label>Ингредиенты</label>
@@ -824,12 +845,16 @@ header {
       turtle_name: cfg.turtle_name || "",
       packagers: (cfg.packagers || []).slice(),
       packager_target: cfg.packager_target || "",
-      buffer_chest: cfg.buffer_chest || ""
+      buffer_chest: cfg.buffer_chest || "",
+      auto_balance: cfg.auto_balance !== false,
+      auto_balance_interval: cfg.auto_balance_interval || 600
     };
     $("cfgTurtleName").value = settingsDraft.turtle_name;
     $("cfgPackagers").value = settingsDraft.packagers.join("\n");
     $("cfgPackagerTarget").value = settingsDraft.packager_target;
     $("cfgBufferChest").value = settingsDraft.buffer_chest;
+    $("cfgAutoBalance").checked = settingsDraft.auto_balance;
+    $("cfgAutoBalanceInterval").value = settingsDraft.auto_balance_interval;
     renderVaultEditor();
   }
 
@@ -868,7 +893,9 @@ header {
       turtle_name: $("cfgTurtleName").value,
       packagers: $("cfgPackagers").value.split("\n").map(function (s) { return s.trim(); }).filter(Boolean),
       packager_target: $("cfgPackagerTarget").value,
-      buffer_chest: $("cfgBufferChest").value
+      buffer_chest: $("cfgBufferChest").value,
+      auto_balance: $("cfgAutoBalance").checked,
+      auto_balance_interval: parseInt($("cfgAutoBalanceInterval").value, 10) || 600
     };
     var msg = $("cfgMsg");
     try {
@@ -926,19 +953,60 @@ header {
         route = "из всех хранилищ → верстак" +
           (cr.destination ? " → в: " + esc(cr.destination) : " → в: любой свободный вольт");
       }
+      var maintain = cr.auto_enabled
+        ? ' <span class="badge on">⏱ поддерживает ' + (cr.auto_target || 0) + " шт</span>"
+        : "";
       card.innerHTML =
         '<div class="cmname">' + imgHtml(cr.output, 24) + " " + esc(prettyName(cr.output)) +
         " ×" + (cr.output_count || 1) +
         ' <span class="muted" style="font-weight:400;">(' +
-        (cr.method === "mechanism" ? "Механизм" : "Верстак") + ")</span>" +
+        (cr.method === "mechanism" ? "Механизм" : "Верстак") + ")</span>" + maintain +
         '<button class="cmDel">🗑 Удалить</button></div>' +
         '<div class="cmroute">← ' + esc(ings) + "</div>" +
-        '<div class="cmroute">' + route + "</div>";
+        '<div class="cmroute">' + route + "</div>" +
+        '<div class="cmcontrols">' +
+        '<input type="number" class="cmOrderCount" min="1" value="16" title="сколько заказать">' +
+        '<button class="cmOrder">🛒 Заказать</button>' +
+        '<label><input type="checkbox" class="cmAutoChk"' + (cr.auto_enabled ? " checked" : "") +
+        '> поддерживать</label>' +
+        '<button class="cmEdit">✏️ Редактировать</button>' +
+        "</div>";
+
       card.querySelector(".cmDel").addEventListener("click", function () {
         if (!confirm("Удалить изготовление?")) return;
         api("/api/custom-recipes?id=" + encodeURIComponent(cr.id), { method: "DELETE" })
           .then(loadCraftRecipes).catch(function () {});
       });
+
+      card.querySelector(".cmOrder").addEventListener("click", async function () {
+        var cnt = parseInt(card.querySelector(".cmOrderCount").value, 10) || 16;
+        try {
+          var r = await api("/api/order", { method: "POST", body: { item: cr.output, count: cnt } });
+          if (r.status === "queued") {
+            alert("✅ Заказ #" + r.id + " создан (" + (r.steps || []).length + " шагов)" +
+              (r.planned < cnt ? "\n⚠️ хватит только на " + r.planned + " из " + cnt : ""));
+          } else if (r.status === "no_recipe") {
+            alert("Этот предмет нельзя скрафтить (рецепт не найден).");
+          } else if (r.status === "done") {
+            alert("✅ Уже есть на складе в нужном количестве.");
+          } else {
+            alert("⚠️ не хватает: " + ((r.missing && Object.keys(r.missing).join(", ")) || "материалов"));
+          }
+        } catch (e) { alert("Ошибка: " + e.message); }
+      });
+
+      card.querySelector(".cmAutoChk").addEventListener("change", function () {
+        var on = card.querySelector(".cmAutoChk").checked;
+        api("/api/custom-recipes", {
+          method: "POST",
+          body: { id: cr.id, auto_enabled: on, auto_target: on ? (cr.auto_target || 64) : 0 }
+        }).then(loadCraftRecipes).catch(function (e) { alert("Ошибка: " + e.message); });
+      });
+
+      card.querySelector(".cmEdit").addEventListener("click", function () {
+        openCraftAdd(cr);
+      });
+
       box.appendChild(card);
     });
     if (!craftRecipes.length) {
@@ -978,14 +1046,22 @@ header {
       : "Верстак: черепашка крафтит предметы через turtle.craft.";
   }
 
-  function openCraftAdd() {
-    craftIngredients = [{ item: "", count: 1 }];
-    $("cmOutput").value = "";
-    $("cmOutputCount").value = 1;
-    $("cmMethod").value = "table";
-    $("cmMechInput").value = "";
-    $("cmMechOutput").value = "";
-    $("cmDestination").value = "";
+  var craftEditingId = null;
+
+  function openCraftAdd(recipe) {
+    craftEditingId = recipe ? recipe.id : null;
+    var rows = (recipe && recipe.ingredients && recipe.ingredients.length)
+      ? recipe.ingredients.map(function (i) { return { item: i.item, count: i.count }; })
+      : [{ item: "", count: 1 }];
+    craftIngredients = rows;
+    $("cmOutput").value = recipe ? (recipe.output || "") : "";
+    $("cmOutputCount").value = recipe ? (recipe.output_count || 1) : 1;
+    $("cmMethod").value = recipe ? (recipe.method || "table") : "table";
+    $("cmMechInput").value = recipe ? (recipe.mechanism_input || "") : "";
+    $("cmMechOutput").value = recipe ? (recipe.mechanism_output || "") : "";
+    $("cmDestination").value = recipe ? (recipe.destination || "") : "";
+    $("cmAutoEnabled").checked = recipe ? !!recipe.auto_enabled : false;
+    $("cmAutoTarget").value = recipe ? (recipe.auto_target || 64) : 64;
     $("cmMsg").textContent = "";
     updateMethodFields();
     renderCraftIngredients();
@@ -1001,8 +1077,11 @@ header {
       ingredients: ingredients,
       destination: $("cmDestination").value.trim(),
       mechanism_input: $("cmMechInput").value.trim(),
-      mechanism_output: $("cmMechOutput").value.trim()
+      mechanism_output: $("cmMechOutput").value.trim(),
+      auto_enabled: $("cmAutoEnabled").checked,
+      auto_target: parseInt($("cmAutoTarget").value, 10) || 0
     };
+    if (craftEditingId) body.id = craftEditingId;
     if (!body.output || !ingredients.length) {
       $("cmMsg").textContent = "Укажи предмет и хотя бы один ингредиент.";
       return;
@@ -1010,6 +1089,7 @@ header {
     try {
       await api("/api/custom-recipes", { method: "POST", body: body });
       $("cmMsg").textContent = "✅ Сохранено";
+      craftEditingId = null;
       await loadCraftRecipes();
       switchCraftTab("list");
     } catch (e) {

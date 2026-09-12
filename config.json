@@ -3,5 +3,7 @@
   "turtle_name": "",
   "packagers": [],
   "packager_target": "",
-  "buffer_chest": ""
+  "buffer_chest": "",
+  "auto_balance": false,
+  "auto_balance_interval": 300
 }
