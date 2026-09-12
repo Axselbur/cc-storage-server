@@ -874,10 +874,11 @@ def _next_order_id():
 
 
 def _replan_order(item, count):
-    """Returns (steps, missing, planned, status) or None if no craftable recipe."""
+    """Returns (steps, missing, planned, status) or None if no craftable recipe.
+
+    NOTE: existing stock of the ordered item is intentionally ignored --
+    the order always crafts the requested amount on top of the stock."""
     stock = dict(STATE.get("items", {}))
-    if stock.get(item, 0) >= count:
-        return [], {}, count, "done"
     if not any(_is_craftable(r) for r in RECIPES_BY_RESULT.get(item, [])):
         return None
 
@@ -929,6 +930,23 @@ def heal_orders():
 AUTO_MAINTENANCE_INTERVAL = 30.0
 
 
+def _heal_stale_orders():
+    """Crafting orders stuck for 5+ minutes (turtle reboot mid-order)
+    go back to the queue. The turtle resumes from step_done, so already
+    completed steps are not re-crafted."""
+    now = time.time()
+    with LOCK:
+        changed = False
+        for o in ORDERS:
+            if o.get("status") == "crafting":
+                age = now - (o.get("created_at") or now)
+                if age > 300:
+                    o["status"] = "queued"
+                    changed = True
+        if changed:
+            save_orders()
+
+
 def _auto_maintain_tick():
     with LOCK:
         stock = dict(STATE.get("items", {}))
@@ -972,10 +990,14 @@ def _auto_maintain_tick():
 
 
 def auto_maintain_loop():
+    tick = 0
     while True:
         time.sleep(AUTO_MAINTENANCE_INTERVAL)
         try:
             _auto_maintain_tick()
+            tick += 1
+            if tick % 6 == 0:  # каждые ~3 минуты
+                _heal_stale_orders()
         except Exception as e:
             log("auto-maintain error: %s" % e)
 

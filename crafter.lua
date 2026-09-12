@@ -611,6 +611,8 @@ end
 
 -- Как CraftingCpuLogic.executeCrafting в AE2: проходы по шагам,
 -- готовые выполняем, после каждого успеха пересканируем склад.
+-- Если заказ уже был начат (step_done > 0) -- продолжаем с места
+-- остановки, чтобы не перекрафчивать готовые шаги.
 local function process_order(order)
     local steps = order.steps or {}
     if #steps == 0 then
@@ -620,7 +622,10 @@ local function process_order(order)
 
     scan_all_vaults()
     local done = {}
-    local made = 0
+    local made = order.step_done or 0
+    for i = 1, made do
+        done[i] = true
+    end
     local lastErr = nil
 
     while made < #steps do
