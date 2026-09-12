@@ -38,6 +38,7 @@ local CONFIG = {
     fallback_buffer_chest = "",
     fallback_auto_balance = true,
     fallback_auto_balance_interval = 600,
+    fallback_vault_capacity = 4096,
 
     use_monitor = true,
     monitor_text_scale = 0.5,
@@ -128,6 +129,12 @@ local function cfg_auto_balance_interval()
     local v = SERVER_CONFIG.auto_balance_interval
     if type(v) == "number" and v > 0 then return v end
     return CONFIG.fallback_auto_balance_interval
+end
+
+local function cfg_vault_capacity()
+    local v = SERVER_CONFIG.vault_capacity
+    if type(v) == "number" and v > 0 then return v end
+    return CONFIG.fallback_vault_capacity or 4096
 end
 
 -- ======================= ПЕРИФЕРИЯ =======================
@@ -289,17 +296,19 @@ local function setup_monitor()
     return true
 end
 
-local function fmt_bar(name, total, maxTotal)
+local function fmt_bar(name, total, capacity)
     local label = name:gsub("^.*:", "")
     if #label > 14 then label = label:sub(1, 14) end
     label = label .. string.rep(" ", 14 - #label)
-    local pct = math.floor(total * 100 / math.max(1, maxTotal))
-    local fill = math.floor(total * 10 / math.max(1, maxTotal))
+    local cap = math.max(1, capacity or 1)
+    local clamped = math.min(total, cap)
+    local pct = math.floor(clamped * 100 / cap)
+    local fill = math.floor(clamped * 10 / cap)
     local bar = string.rep("#", fill) .. string.rep("-", 10 - fill)
-    return label .. " " .. bar .. " " .. tostring(pct) .. "%"
+    return label .. " " .. bar .. " " .. tostring(pct) .. "% (" .. tostring(total) .. ")"
 end
 
-local function draw_status(found, totalVaults, kinds, total, logisticsStatus, serverLink, missing, vaultStats)
+local function draw_status(found, totalVaults, kinds, total, logisticsStatus, serverLink, missing, vaultStats, capacity)
     term.clear()
     term.setCursorPos(1, 1)
     local _, h = term.getSize()
@@ -312,17 +321,12 @@ local function draw_status(found, totalVaults, kinds, total, logisticsStatus, se
         print("NO SERVER CONNECTION!")
     end
 
-    local maxTotal = 1
-    for _, v in ipairs(vaultStats or {}) do
-        if v.total > maxTotal then maxTotal = v.total end
-    end
-
     local rows = h - 3
     if #missing > 0 then rows = rows - 1 end
     local shown = 0
     for _, v in ipairs(vaultStats or {}) do
         if shown >= rows then break end
-        print(fmt_bar(v.name, v.total, maxTotal))
+        print(fmt_bar(v.name, v.total, capacity))
         shown = shown + 1
     end
     if #missing > 0 and shown < rows then
@@ -564,7 +568,7 @@ local function main()
             table.sort(vaultStats, function(a, b) return a.total > b.total end)
 
             draw_status(#active_vaults, #cfg_vaults(), kinds, total,
-                lastLogistics, server_ok, missing, vaultStats)
+                lastLogistics, server_ok, missing, vaultStats, cfg_vault_capacity())
         end
 
         os.sleep(CONFIG.transfer_interval)

@@ -38,6 +38,7 @@ CONFIG_DEFAULTS = {
     "buffer_chest": "",      # buffer chest to distribute into vaults
     "auto_balance": True,    # keep vaults evenly filled automatically
     "auto_balance_interval": 600,  # seconds between auto-balance runs
+    "vault_capacity": 4096,  # assumed items per vault (for the monitor fill bars)
 }
 
 LOCK = threading.RLock()

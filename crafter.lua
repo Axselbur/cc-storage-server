@@ -569,32 +569,46 @@ local function draw_screen(line1, line2)
     if line2 then print(line2) end
 end
 
--- Экран очереди: список заказов с сервера.
+-- Экран очереди: ВСЕ заказы с сервера (монитор большой).
+-- Строки дополняются пробелами до ширины экрана, чтобы от прошлого
+-- кадра не оставалось "хвостов" (артефактов).
 local function draw_queue_screen(orders)
     term.clear()
     term.setCursorPos(1, 1)
-    local _, h = term.getSize()
-    print("== Auto Crafter ==")
-    print("Turtle: " .. tostring(turtleName))
-    print("Vaults: " .. tostring(#activeVaults))
-    print(configOk and "SERVER LINK: OK" or "NO SERVER CONNECTION!")
-    print("Queue:")
+    local w, h = term.getSize()
+    local function wline(s)
+        local t = tostring(s or "")
+        if #t > w then t = t:sub(1, w) end
+        term.write(t .. string.rep(" ", w - #t))
+        print("")
+    end
+
+    wline("== Auto Crafter ==")
+    wline("Turtle: " .. tostring(turtleName))
+    wline("Vaults: " .. tostring(#activeVaults))
+    wline(configOk and "SERVER LINK: OK" or "NO SERVER CONNECTION!")
+    wline("Queue:")
+
     if not orders or #orders == 0 then
-        print("  (пусто)")
+        wline("  (пусто)")
         return
     end
-    local max = math.max(1, h - 6)
-    for i = 1, math.min(#orders, max) do
+    for i = 1, #orders do
         local o = orders[i]
-        local mark = "."
-        if o.status == "queued" then mark = "[Q]"
-        elseif o.status == "crafting" then mark = "[C]"
-        elseif o.status == "done" then mark = "[OK]"
-        elseif o.status == "failed" then mark = "[X]"
-        elseif o.status == "missing" then mark = "[!]" end
-        local name = tostring(o.item):match(":([^:]+)$") or tostring(o.item)
-        if #name > 12 then name = name:sub(1, 12) end
-        print(" " .. mark .. " " .. name .. " x" .. tostring(o.count))
+        if type(o) == "table" then
+            local item = tostring(o.item or "?")
+            local name = string.match(item, ":([^:]+)$") or item
+            if #name > 16 then name = name:sub(1, 16) end
+            local cnt = tonumber(o.count) or 0
+            local st = tostring(o.status or "")
+            local mark = "?"
+            if st == "queued" then mark = "[Q]"
+            elseif st == "crafting" then mark = "[C]"
+            elseif st == "done" then mark = "[OK]"
+            elseif st == "failed" then mark = "[X]"
+            elseif st == "missing" then mark = "[!]" end
+            wline(" " .. mark .. " " .. name .. " x" .. tostring(cnt))
+        end
     end
 end
 

@@ -407,6 +407,11 @@ header {
       <label>Интервал автобалансировки (сек)</label>
       <input type="number" id="cfgAutoBalanceInterval" min="60" value="600" style="width:140px;">
     </div>
+    <div class="sfield">
+      <label>Вместимость одного вольта (для шкалы заполнения на мониторе)</label>
+      <input type="number" id="cfgVaultCapacity" min="1" value="4096" style="width:140px;">
+      <div class="inghint" style="color:var(--muted);font-size:11px;">Сколько предметов влезает в один вольт/силос твоего тира. 0 шкала не зависит от вместимости.</div>
+    </div>
 
     <button id="btnSaveConfig">Сохранить</button>
     <div id="cfgMsg" class="muted" style="margin-top:8px;min-height:14px;font-size:12px;"></div>
@@ -847,7 +852,8 @@ header {
       packager_target: cfg.packager_target || "",
       buffer_chest: cfg.buffer_chest || "",
       auto_balance: cfg.auto_balance !== false,
-      auto_balance_interval: cfg.auto_balance_interval || 600
+      auto_balance_interval: cfg.auto_balance_interval || 600,
+      vault_capacity: cfg.vault_capacity || 4096
     };
     $("cfgTurtleName").value = settingsDraft.turtle_name;
     $("cfgPackagers").value = settingsDraft.packagers.join("\n");
@@ -855,6 +861,7 @@ header {
     $("cfgBufferChest").value = settingsDraft.buffer_chest;
     $("cfgAutoBalance").checked = settingsDraft.auto_balance;
     $("cfgAutoBalanceInterval").value = settingsDraft.auto_balance_interval;
+    $("cfgVaultCapacity").value = settingsDraft.vault_capacity;
     renderVaultEditor();
   }
 
@@ -895,7 +902,8 @@ header {
       packager_target: $("cfgPackagerTarget").value,
       buffer_chest: $("cfgBufferChest").value,
       auto_balance: $("cfgAutoBalance").checked,
-      auto_balance_interval: parseInt($("cfgAutoBalanceInterval").value, 10) || 600
+      auto_balance_interval: parseInt($("cfgAutoBalanceInterval").value, 10) || 600,
+      vault_capacity: parseInt($("cfgVaultCapacity").value, 10) || 4096
     };
     var msg = $("cfgMsg");
     try {
