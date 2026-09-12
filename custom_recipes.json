@@ -19,5 +19,24 @@
     "destination": "create_connected:item_silo_75",
     "mechanism_input": "",
     "mechanism_output": ""
+  },
+  {
+    "id": "custom:1789177693023",
+    "output": "minecraft:golden_apple",
+    "output_count": 1,
+    "method": "table",
+    "ingredients": [
+      {
+        "item": "minecraft:apple",
+        "count": 1
+      },
+      {
+        "item": "minecraft:gold_ingot",
+        "count": 8
+      }
+    ],
+    "auto_enabled": true,
+    "auto_target": 128,
+    "destination": "create_connected:item_silo_75"
   }
 ]
