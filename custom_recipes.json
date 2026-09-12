@@ -1,17 +1,17 @@
 [
   {
-    "id": "custom:1789176507778",
+    "id": "custom:1789176431832",
     "output": "create:cogwheel",
     "output_count": 1,
     "method": "table",
     "ingredients": [
       {
-        "item": "minecraft:oak_planks",
+        "item": "create:shaft",
         "count": 1
       },
       {
-        "item": "create:shaft",
-        "count": 128
+        "item": "minecraft:oak_planks",
+        "count": 1
       }
     ]
   }
