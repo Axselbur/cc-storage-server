@@ -89,13 +89,31 @@ local function fetch_server_config()
     return false
 end
 
+-- ======================= ПЕРИФЕРИЯ =======================
+local function is_vault_name(n)
+    return string.match(n, "^create:item_vault_%d+$") ~= nil
+        or string.match(n, "^create_connected:item_silo_%d+$") ~= nil
+end
+
+local function discover_vaults()
+    local out = {}
+    for _, n in ipairs(peripheral.getNames()) do
+        if is_vault_name(n) then
+            table.insert(out, n)
+        end
+    end
+    table.sort(out)
+    return out
+end
+
 local function cfg_vaults()
     local v = SERVER_CONFIG.vaults
     if type(v) == "table" and #v > 0 then return v end
-    return CONFIG.fallback_storage or {}
+    v = CONFIG.fallback_storage or {}
+    if #v > 0 then return v end
+    return discover_vaults()
 end
 
--- ======================= ПЕРИФЕРИЯ =======================
 local function normalize_name(s)
     return string.lower(string.gsub(s, "[:%s_%-]", ""))
 end
@@ -157,6 +175,7 @@ end
 local activeVaults = {}
 local stock = {}
 local turtleName = nil
+local configOk = false
 
 local function scan_all_vaults()
     activeVaults = {}
@@ -534,6 +553,7 @@ local function draw_screen(line1, line2)
     print("== Auto Crafter ==")
     print("Turtle: " .. tostring(turtleName))
     print("Vaults: " .. tostring(#activeVaults))
+    print(configOk and "SERVER LINK: OK" or "NO SERVER CONNECTION!")
     if line1 then print(line1) end
     if line2 then print(line2) end
 end
@@ -552,17 +572,19 @@ local function main()
         iter = iter + 1
 
         if iter % 4 == 1 then
-            fetch_server_config()
+            configOk = fetch_server_config()
             if not turtleName then
                 turtleName = SERVER_CONFIG.turtle_name
             end
         end
 
+        -- heartbeat всегда, чтобы сайт видел черепашку на связи
+        heartbeat()
+
         if scan_all_vaults() == 0 then
-            draw_screen("NO VAULT REACHABLE", "sleeping...")
+            draw_screen("NO VAULT REACHABLE", "add vaults in config or check wired network")
             os.sleep(5)
         else
-            heartbeat()
             local data = api_get("/api/orders/next")
             local order = data and data.order
             if order then
