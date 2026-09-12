@@ -151,9 +151,15 @@ local function get_inventory(name)
 end
 
 -- discover_vaults: все периферии, похожие на вольты/силосы.
+-- Принимаем любые варианты имён: create:item_vault_1,
+-- create_connected:item_silo_75, Create_Connected_Item_Silo_75 и т.п.
 local function is_vault_name(n)
-    return string.match(n, "^create:item_vault_%d+$") ~= nil
-        or string.match(n, "^create_connected:item_silo_%d+$") ~= nil
+    local norm = string.lower(string.gsub(n, "[:%s_%-]", ""))
+    if string.match(norm, "(%d+)$") == nil then
+        return false
+    end
+    return string.match(norm, "itemvault") ~= nil
+        or string.match(norm, "itemsilo") ~= nil
 end
 
 local function discover_vaults()
