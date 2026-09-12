@@ -279,9 +279,12 @@ header {
   <div id="titleBlock">
     <div id="title">CC STORAGE SERVER</div>
     <div id="statusBadge" class="badge muted">● Нет данных</div>
+    <div id="crafterBadge" class="badge muted">🐢 ни разу не выходила на связь</div>
     <div id="statsLine">Предметов: — • Обновлено: —</div>
   </div>
   <div id="headerBtns">
+    <button id="btnBalance">🔀 Выровнять</button>
+    <span id="balanceStatus" class="conn"></span>
     <button id="btnCraft">➕ Изготовление</button>
     <button id="btnSettings">⚙️ Настройки</button>
   </div>
@@ -567,6 +570,18 @@ header {
     for (var k in items) { kinds++; total += items[k] || 0; }
     $("statsLine").textContent = "Предметов: " + kinds + " видов, всего " + total +
       " шт. • Обновлено: " + fmtTime(state.updated_at);
+
+    var cb = $("crafterBadge");
+    if (state.crafter_online) {
+      cb.textContent = "🐢 Черепашка на связи";
+      cb.className = "badge ok";
+    } else if (state.crafter_last_seen) {
+      cb.textContent = "🐢 оффлайн (была " + fmtHHMM(state.crafter_last_seen) + ")";
+      cb.className = "badge err";
+    } else {
+      cb.textContent = "🐢 ни разу не выходила на связь";
+      cb.className = "badge muted";
+    }
   }
 
   // ---------------- vaults ----------------
@@ -750,6 +765,10 @@ header {
           msg.textContent += " — ⚠️ материалов хватает только на " + r.planned + " из " + count +
             (r.missing && r.missing.length ? ", не хватает: " + r.missing.join(", ") : "");
         }
+        if (state && !state.crafter_online) {
+          msg.className = "err";
+          msg.textContent += " — ⚠️ черепашка не в сети, заказ подождёт.";
+        }
       } else if (r.status === "missing") {
         msg.className = "warn";
         msg.textContent = "⚠️ не хватает: " + ((r.missing || []).join(", ") || "материалов");
@@ -776,10 +795,13 @@ header {
       var card = document.createElement("div");
       card.className = "ocard";
       var st = ORDER_STATUS[o.status] || ["❔", o.status || "?"];
+      var extra = (o.status === "queued" && state && !state.crafter_online)
+        ? " <span style='color:var(--red);'>(черепашка не в сети)</span>" : "";
       card.innerHTML = imgHtml(o.item, 24) +
         '<div class="oName">' + esc(prettyName(o.item)) + " × " + o.count + "</div>" +
         '<div class="oStatus">' + st[0] + " " + esc(st[1]) +
         (o.status === "crafting" ? " шаг " + ((o.step_done || 0) + 1) + "/" + ((o.steps || []).length) : "") +
+        extra +
         "</div>" +
         '<button class="odel" title="удалить заказ">✕</button>';
       card.querySelector(".odel").addEventListener("click", function () {
@@ -995,6 +1017,21 @@ header {
     }
   }
 
+  // ---------------- балансировка ----------------
+  var balanceState = { status: "idle" };
+
+  async function refreshBalance() {
+    try {
+      balanceState = await api("/api/balance");
+    } catch (e) { balanceState = { status: "idle" }; }
+    var txt = "";
+    if (balanceState.status === "requested") txt = "⏳ ждём компьютер";
+    else if (balanceState.status === "running") txt = "🔄 перекладываю " + balanceState.moved;
+    else if (balanceState.status === "done") txt = "✅ готово (" + balanceState.moved + " стаков)";
+    else if (balanceState.status === "failed") txt = "❌ " + balanceState.message;
+    $("balanceStatus").textContent = txt;
+  }
+
   // ---------------- refresh ----------------
   async function refresh() {
     try { state = await api("/api/state"); } catch (e) { state = null; }
@@ -1003,6 +1040,7 @@ header {
     renderStorage();
     try { orders = await api("/api/orders"); } catch (e) { orders = []; }
     renderOrders();
+    refreshBalance();
   }
 
   // ---------------- bind ----------------
@@ -1013,6 +1051,11 @@ header {
   $("btnOrder").addEventListener("click", submitOrder);
   $("btnSettings").addEventListener("click", openSettings);
   $("btnSaveConfig").addEventListener("click", saveSettings);
+  $("btnBalance").addEventListener("click", function () {
+    api("/api/balance", { method: "POST" })
+      .then(refreshBalance)
+      .catch(function (e) { alert(e.message); });
+  });
 
   $("btnCraft").addEventListener("click", openCraftModal);
   $("cmClose").addEventListener("click", closeCraftModal);

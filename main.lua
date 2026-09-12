@@ -281,11 +281,120 @@ local function draw_status(found, totalVaults, kinds, total, logisticsStatus, se
     end
 end
 
--- ======================= БАЛАНСИРОВКА (часть 8) =======================
+-- ======================= БАЛАНСИРОВКА ХРАНИЛИЩ =======================
+-- Один list() на вольт -> модель {total, slots}. Перекладываем самый
+-- большой стак, который влезает в разницу, из самого полного в самый
+-- пустой. Делить стаки нельзя; лимит 400 стаков за запуск.
+local function balance_vaults()
+    local model = {}
+
+    local function scan_into(name)
+        local inv = get_inventory(name)
+        if not inv then return nil end
+        local ok, list = pcall(inv.list)
+        if not ok then return nil end
+        local total = 0
+        local slots = {}
+        for slot, item in pairs(list) do
+            slots[slot] = item.count
+            total = total + item.count
+        end
+        return { name = name, total = total, slots = slots }
+    end
+
+    for _, name in ipairs(active_vaults) do
+        local m = scan_into(name)
+        if m then table.insert(model, m) end
+    end
+    if #model < 2 then
+        return "done", 0
+    end
+
+    local blocked = {}
+    local moved = 0
+    local steps = 0
+
+    while steps < 400 do
+        -- если у самого полного есть неизвестные слоты -- пересканировать
+        table.sort(model, function(a, b) return a.total > b.total end)
+        local full = model[1]
+        if full.slots[-1] then
+            local fresh = scan_into(full.name)
+            if fresh then
+                full.total = fresh.total
+                full.slots = fresh.slots
+            end
+        end
+
+        -- подобрать пару: самый полный -> самый пустой, не заблокированную
+        local fromV, toV = nil, nil
+        for i = 1, #model do
+            for j = #model, 1, -1 do
+                if i < j and not blocked[model[i].name .. "->" .. model[j].name] then
+                    fromV, toV = model[i], model[j]
+                    break
+                end
+            end
+            if fromV then break end
+        end
+        if not fromV then break end
+
+        local diff = fromV.total - toV.total
+        if diff < 1 then break end
+
+        -- самый большой стак, который влезает в разницу
+        local bestSlot, bestCount = nil, 0
+        for slot, cnt in pairs(fromV.slots) do
+            if cnt > bestCount and cnt <= diff then
+                bestSlot, bestCount = slot, cnt
+            end
+        end
+        if not bestSlot then
+            blocked[fromV.name .. "->" .. toV.name] = true
+            steps = steps + 1
+        else
+            local fromInv = get_inventory(fromV.name)
+            local okp, m = pcall(fromInv.pushItems,
+                resolve_name(toV.name) or toV.name, bestSlot, bestCount)
+            if okp and m and m > 0 then
+                moved = moved + m
+                fromV.total = fromV.total - m
+                toV.total = toV.total + m
+                fromV.slots[bestSlot] = bestCount - m
+                if fromV.slots[bestSlot] <= 0 then fromV.slots[bestSlot] = nil end
+                toV.slots[-1] = (toV.slots[-1] or 0) + m
+            else
+                blocked[fromV.name .. "->" .. toV.name] = true
+            end
+            steps = steps + 1
+        end
+
+        if steps % 10 == 0 then
+            api_post("/api/balance/progress",
+                { status = "running", moved = moved, message = "перекладываю" })
+            os.sleep(0)
+        end
+    end
+
+    return "done", moved
+end
+
 local function check_balance_job()
-    -- Заполняется в части 8: GET /api/balance -> если requested, запустить
-    -- перекладывание стаков между вольтами.
-    return false
+    local data = api_get("/api/balance")
+    if not data or data.status ~= "requested" then
+        return false
+    end
+    api_post("/api/balance/progress", { status = "running", moved = 0, message = "начал" })
+    local ok, err = pcall(function()
+        local status, moved = balance_vaults()
+        api_post("/api/balance/progress",
+            { status = status, moved = moved, message = "готово" })
+    end)
+    if not ok then
+        api_post("/api/balance/progress",
+            { status = "failed", moved = 0, message = tostring(err) })
+    end
+    return true
 end
 
 -- ======================= ГЛАВНЫЙ ЦИКЛ =======================

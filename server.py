@@ -51,6 +51,13 @@ GITHUB_BRANCH = os.environ.get("GITHUB_BRANCH", "main")
 
 GITHUB_SYNC = {"last_ok": None, "last_error": None, "last_attempt_at": None}
 CRAFTER_STATE = {"last_seen": None}
+BALANCE_STATE = {
+    "status": "idle",       # idle | requested | running | done | failed
+    "moved": 0,
+    "message": "",
+    "requested_at": None,
+    "updated_at": None,
+}
 
 TEXTURE_INDEX = {}       # item_id -> png path
 RECIPES_BY_RESULT = {}   # item_id -> [recipe]
@@ -1071,6 +1078,12 @@ class Handler(BaseHTTPRequestHandler):
                 with LOCK:
                     self._json(200, {"recipes": CUSTOM_RECIPES})
 
+            elif path == "/api/balance":
+                if not self._require_device_or_admin():
+                    return
+                with LOCK:
+                    self._json(200, dict(BALANCE_STATE))
+
             elif path == "/main.lua":
                 self._serve_file("main.lua", "text/plain; charset=utf-8")
 
@@ -1106,6 +1119,27 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 with LOCK:
                     CRAFTER_STATE["last_seen"] = time.time()
+                self._json(200, {"ok": True})
+            elif path == "/api/balance":
+                if not self._require_admin():
+                    return
+                with LOCK:
+                    BALANCE_STATE["status"] = "requested"
+                    BALANCE_STATE["moved"] = 0
+                    BALANCE_STATE["message"] = "ждём компьютер"
+                    BALANCE_STATE["requested_at"] = time.time()
+                    BALANCE_STATE["updated_at"] = time.time()
+                self._json(200, {"ok": True, "status": "requested"})
+            elif path == "/api/balance/progress":
+                if not self._require_device_or_admin():
+                    return
+                data = self._read_json()
+                if isinstance(data, dict):
+                    with LOCK:
+                        BALANCE_STATE["status"] = data.get("status", "running")
+                        BALANCE_STATE["moved"] = int(data.get("moved", 0))
+                        BALANCE_STATE["message"] = str(data.get("message", ""))
+                        BALANCE_STATE["updated_at"] = time.time()
                 self._json(200, {"ok": True})
             elif path == "/api/custom-recipes":
                 if not self._require_admin():
