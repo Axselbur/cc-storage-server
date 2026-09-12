@@ -16,7 +16,7 @@
     ],
     "auto_enabled": true,
     "auto_target": 128,
-    "destination": null,
+    "destination": "create_connected:item_silo_75",
     "mechanism_input": "",
     "mechanism_output": ""
   }
