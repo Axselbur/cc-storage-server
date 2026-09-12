@@ -1406,6 +1406,12 @@ class Handler(BaseHTTPRequestHandler):
         if status == "done":
             self._json(200, {"status": "done"})
             return
+        # результат ручного заказа кладём в "куда упаковщики кладут"
+        target_vault = (CONFIG.get("packager_target") or "").strip()
+        if target_vault:
+            for s in steps:
+                if not s.get("destination"):
+                    s["destination"] = target_vault
         with LOCK:
             oid = _next_order_id()
             order = {
