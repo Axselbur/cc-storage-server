@@ -27,12 +27,16 @@
     "method": "table",
     "ingredients": [
       {
+        "item": "minecraft:gold_ingot",
+        "count": 4
+      },
+      {
         "item": "minecraft:apple",
         "count": 1
       },
       {
         "item": "minecraft:gold_ingot",
-        "count": 8
+        "count": 4
       }
     ],
     "auto_enabled": true,
