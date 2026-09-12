@@ -240,9 +240,23 @@ end
 local function push_slot_out(slot, target)
     local count = turtle.getItemCount(slot)
     if count <= 0 then return true end
-    local ok, m = pcall(turtle.pushItems, target, slot, count)
-    if not ok then return false end
-    return turtle.getItemCount(slot) == 0
+    -- основной путь: вольт сам забирает из черепашки
+    -- (то же направление, что при выдаче ингредиентов -- оно работает)
+    local vault = get_inventory(target)
+    if vault then
+        local ok, m = pcall(vault.pullItems, turtleName, slot, count)
+        if ok and m and m > 0 then
+            count = turtle.getItemCount(slot)
+        end
+    end
+    -- запасной путь: толкаем из черепашки
+    if count > 0 then
+        local ok, m = pcall(turtle.pushItems, target, slot, count)
+        if ok and m and m > 0 then
+            count = turtle.getItemCount(slot)
+        end
+    end
+    return count <= 0
 end
 
 -- Всё из черепашки -> destination (если задан) или в любой вольт.
@@ -269,21 +283,37 @@ local function empty_turtle(destination)
 end
 
 -- Все слоты чужого инвентаря -> destination, затем вольты по очереди.
-local function drain_to_vaults(inv, destination)
+local function drain_to_vaults(inv, destination, sourceName)
     if not inv then return end
     local ok, list = pcall(inv.list)
     if not ok then return end
     for slot, item in pairs(list) do
         local count = item.count
         if count > 0 then
+            local targets = {}
             if destination and destination ~= "" then
-                local okp, m = pcall(inv.pushItems, resolve_name(destination) or destination, slot, count)
-                if okp and m and m > 0 then count = count - m end
+                table.insert(targets, resolve_name(destination) or destination)
             end
             for _, vname in ipairs(activeVaults) do
+                local rn = resolve_name(vname) or vname
+                local dup = false
+                for _, t in ipairs(targets) do
+                    if t == rn then dup = true end
+                end
+                if not dup then table.insert(targets, rn) end
+            end
+            for _, tname in ipairs(targets) do
                 if count <= 0 then break end
-                local okp, m = pcall(inv.pushItems, resolve_name(vname) or vname, slot, count)
+                local okp, m = pcall(inv.pushItems, tname, slot, count)
                 if okp and m and m > 0 then count = count - m end
+                -- запасной путь: вольт сам тянет из этого инвентаря
+                if count > 0 and sourceName then
+                    local vault = get_inventory(tname)
+                    if vault then
+                        local ok2, m2 = pcall(vault.pullItems, sourceName, slot, count)
+                        if ok2 and m2 and m2 > 0 then count = count - m2 end
+                    end
+                end
             end
         end
     end
@@ -309,10 +339,20 @@ end
 
 local function push_all_turtle_to(target)
     local moved = 0
+    local input = get_inventory(target)
     for slot = 1, 16 do
         if turtle.getItemCount(slot) > 0 then
-            local ok, m = pcall(turtle.pushItems, target, slot, turtle.getItemCount(slot))
-            if ok and m and m > 0 then moved = moved + m end
+            local count = turtle.getItemCount(slot)
+            local ok, m = pcall(turtle.pushItems, target, slot, count)
+            if ok and m and m > 0 then
+                moved = moved + m
+                count = turtle.getItemCount(slot)
+            end
+            -- запасной путь: приёмник сам тянет из черепашки
+            if count > 0 and input then
+                local ok2, m2 = pcall(input.pullItems, turtleName, slot, count)
+                if ok2 and m2 and m2 > 0 then moved = moved + m2 end
+            end
         end
     end
     return moved
@@ -411,7 +451,7 @@ local function craft_step_mechanism(step)
     local batches = step.batches or 1
 
     -- чужой результат в выходе не считаем
-    drain_to_vaults(output, step.destination)
+    drain_to_vaults(output, step.destination, outName)
 
     local remaining = batches
     while remaining > 0 do
@@ -460,7 +500,7 @@ local function craft_step_mechanism(step)
         -- ждать результат (бесконечно, с heartbeat)
         wait_for_output(output, result, per_craft * fed)
 
-        drain_to_vaults(output, step.destination)
+        drain_to_vaults(output, step.destination, outName)
         remaining = remaining - fed
         print("mechanism: " .. tostring(result) .. " " ..
             tostring(batches - remaining) .. "/" .. tostring(batches))
