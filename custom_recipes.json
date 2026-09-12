@@ -27,16 +27,16 @@
     "method": "table",
     "ingredients": [
       {
-        "item": "minecraft:gold_ingot",
-        "count": 8
-      },
-      {
         "item": "minecraft:apple",
         "count": 1
+      },
+      {
+        "item": "minecraft:gold_ingot",
+        "count": 8
       }
     ],
     "auto_enabled": false,
-    "auto_target": 0,
+    "auto_target": 64,
     "destination": "create_connected:item_silo_75",
     "mechanism_input": "",
     "mechanism_output": ""
