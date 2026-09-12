@@ -1126,7 +1126,7 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(200, dict(CONFIG))
 
             elif path == "/api/orders":
-                if not self._require_admin():
+                if not self._require_device_or_admin():
                     return
                 with LOCK:
                     self._json(200, {"orders": ORDERS[:20]})

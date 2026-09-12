@@ -260,22 +260,27 @@ end
 -- ======================= МОНИТОР =======================
 local monitor = nil
 
+-- ЖЁСТКОЕ ПРАВИЛО: монитор только вплотную к компьютеру (любой гранью),
+-- по сети (wired-модемом) мониторы не подхватываются.
+local DIRECT_SIDES = { top = true, bottom = true, left = true, right = true,
+                       front = true, back = true }
+
 local function setup_monitor()
     if not CONFIG.use_monitor then
         return false
     end
     local mName = nil
     for _, n in ipairs(peripheral.getNames()) do
-        if peripheral.getType(n) == "monitor" then
+        if DIRECT_SIDES[n] and peripheral.getType(n) == "monitor" then
             mName = n
             break
         end
     end
     if not mName then
-        print("No monitor found (output on this screen)")
+        print("No monitor attached (touch only, not via network)")
         return false
     end
-    print("Output -> external monitor")
+    print("Output -> external monitor (" .. mName .. ")")
     monitor = peripheral.wrap(mName)
     if monitor.setTextScale then
         pcall(monitor.setTextScale, CONFIG.monitor_text_scale)
@@ -284,19 +289,43 @@ local function setup_monitor()
     return true
 end
 
-local function draw_status(found, totalVaults, kinds, total, logisticsStatus, serverLink, missing)
+local function fmt_bar(name, total, maxTotal)
+    local label = name:gsub("^.*:", "")
+    if #label > 14 then label = label:sub(1, 14) end
+    label = label .. string.rep(" ", 14 - #label)
+    local pct = math.floor(total * 100 / math.max(1, maxTotal))
+    local fill = math.floor(total * 10 / math.max(1, maxTotal))
+    local bar = string.rep("#", fill) .. string.rep("-", 10 - fill)
+    return label .. " " .. bar .. " " .. tostring(pct) .. "%"
+end
+
+local function draw_status(found, totalVaults, kinds, total, logisticsStatus, serverLink, missing, vaultStats)
     term.clear()
     term.setCursorPos(1, 1)
+    local _, h = term.getSize()
     print("== Storage Monitor ==")
-    print("Vaults: " .. tostring(found) .. "/" .. tostring(totalVaults))
-    print("Items: " .. tostring(kinds) .. " kinds, " .. tostring(total) .. " total")
-    print("Logistics: " .. tostring(logisticsStatus))
+    print("Vaults: " .. tostring(found) .. "/" .. tostring(totalVaults)
+        .. " | Items: " .. tostring(kinds) .. "/" .. tostring(total))
     if serverLink then
         print("SERVER LINK: OK")
     else
         print("NO SERVER CONNECTION!")
     end
-    if #missing > 0 then
+
+    local maxTotal = 1
+    for _, v in ipairs(vaultStats or {}) do
+        if v.total > maxTotal then maxTotal = v.total end
+    end
+
+    local rows = h - 3
+    if #missing > 0 then rows = rows - 1 end
+    local shown = 0
+    for _, v in ipairs(vaultStats or {}) do
+        if shown >= rows then break end
+        print(fmt_bar(v.name, v.total, maxTotal))
+        shown = shown + 1
+    end
+    if #missing > 0 and shown < rows then
         print("Missing: " .. table.concat(missing, ", "))
     end
 end
@@ -432,6 +461,7 @@ local function main()
     local kinds, total = 0, 0
     local lastLogistics = "idle"
     local missing = {}
+    local vaultData = {}
     local lastAutoBalance = os.epoch("utc")
 
     while true do
@@ -485,7 +515,7 @@ local function main()
                 active_vaults = {}
                 missing = {}
                 local items = {}
-                local vaultData = {}
+                vaultData = {}
                 for _, name in ipairs(names) do
                     local inv = get_inventory(name)
                     if inv then
@@ -525,8 +555,16 @@ local function main()
                 print("Cycle error: " .. tostring(errCycle))
             end
 
+            local vaultStats = {}
+            for _, name in ipairs(active_vaults) do
+                local vt = 0
+                for _, cnt in pairs(vaultData[name] or {}) do vt = vt + cnt end
+                table.insert(vaultStats, { name = name, total = vt })
+            end
+            table.sort(vaultStats, function(a, b) return a.total > b.total end)
+
             draw_status(#active_vaults, #cfg_vaults(), kinds, total,
-                lastLogistics, server_ok, missing)
+                lastLogistics, server_ok, missing, vaultStats)
         end
 
         os.sleep(CONFIG.transfer_interval)

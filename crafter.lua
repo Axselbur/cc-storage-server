@@ -530,22 +530,27 @@ local function process_order(order)
 end
 
 -- ======================= МОНИТОР =======================
+-- ЖЁСТКОЕ ПРАВИЛО: монитор только вплотную к черепашке (любой гранью),
+-- по сети мониторы не подхватываются.
+local DIRECT_SIDES = { top = true, bottom = true, left = true, right = true,
+                       front = true, back = true }
+
 local function setup_monitor()
     if not CONFIG.use_monitor then
         return
     end
     local mName = nil
     for _, n in ipairs(peripheral.getNames()) do
-        if peripheral.getType(n) == "monitor" then
+        if DIRECT_SIDES[n] and peripheral.getType(n) == "monitor" then
             mName = n
             break
         end
     end
     if not mName then
-        print("No monitor found (output on this screen)")
+        print("No monitor attached (touch only, not via network)")
         return
     end
-    print("Output -> external monitor")
+    print("Output -> external monitor (" .. mName .. ")")
     local mon = peripheral.wrap(mName)
     if mon.setTextScale then
         pcall(mon.setTextScale, CONFIG.monitor_text_scale)
@@ -562,6 +567,35 @@ local function draw_screen(line1, line2)
     print(configOk and "SERVER LINK: OK" or "NO SERVER CONNECTION!")
     if line1 then print(line1) end
     if line2 then print(line2) end
+end
+
+-- Экран очереди: список заказов с сервера.
+local function draw_queue_screen(orders)
+    term.clear()
+    term.setCursorPos(1, 1)
+    local _, h = term.getSize()
+    print("== Auto Crafter ==")
+    print("Turtle: " .. tostring(turtleName))
+    print("Vaults: " .. tostring(#activeVaults))
+    print(configOk and "SERVER LINK: OK" or "NO SERVER CONNECTION!")
+    print("Queue:")
+    if not orders or #orders == 0 then
+        print("  (пусто)")
+        return
+    end
+    local max = math.max(1, h - 6)
+    for i = 1, math.min(#orders, max) do
+        local o = orders[i]
+        local mark = "."
+        if o.status == "queued" then mark = "[Q]"
+        elseif o.status == "crafting" then mark = "[C]"
+        elseif o.status == "done" then mark = "[OK]"
+        elseif o.status == "failed" then mark = "[X]"
+        elseif o.status == "missing" then mark = "[!]" end
+        local name = tostring(o.item):match(":([^:]+)$") or tostring(o.item)
+        if #name > 12 then name = name:sub(1, 12) end
+        print(" " .. mark .. " " .. name .. " x" .. tostring(o.count))
+    end
 end
 
 -- ======================= ГЛАВНЫЙ ЦИКЛ =======================
@@ -597,7 +631,8 @@ local function main()
                 draw_screen("Order #" .. tostring(order.id) .. ": " .. tostring(order.item))
                 pcall(process_order, order)
             else
-                draw_screen("Waiting for orders...")
+                local ordData = api_get("/api/orders")
+                draw_queue_screen(ordData and ordData.orders or nil)
                 os.sleep(CONFIG.poll_interval)
             end
         end
