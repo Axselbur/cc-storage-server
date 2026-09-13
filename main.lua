@@ -39,7 +39,6 @@ local CONFIG = {
     fallback_auto_balance = true,
     fallback_auto_balance_interval = 600,
     fallback_vault_capacity = 4096,
-    fallback_boilers = {},
 
     use_monitor = true,
     monitor_text_scale = 0.5,
@@ -260,183 +259,6 @@ local function logistics_pass(active_vaults)
     return moved
 end
 
--- ======================= КОТЛЫ (STEAM BOILERS) =======================
--- Каждые ~5 секунд проверяем топливный слот котла: пусто -- толкаем
--- 1 штуку топлива из вольтов. Если котёл нельзя прочитать как
--- инвентарь -- кормим по таймеру (burn из FUELS, с запасом).
-local FUELS = {
-    coal = { item = "minecraft:coal", burn = 80 },
-    coal_block = { item = "minecraft:coal_block", burn = 800 },
-    biomass = { item = "create:biomass_pellet", burn = 120 },
-}
-
-local function cfg_boilers()
-    local b = SERVER_CONFIG.boilers
-    if type(b) == "table" and #b > 0 then return b end
-    return CONFIG.fallback_boilers or {}
-end
-
-local boilerState = {}     -- name -> { lastPush, primaryFed, warn }
-local boilerWarning = false
-local boilerStatus = {}    -- строки статуса для экрана
-
-local function find_slot(inv, id)
-    local ok, list = pcall(inv.list)
-    if not ok or type(list) ~= "table" then return nil end
-    for slot, item in pairs(list) do
-        if type(item) == "table" and item.name == id then
-            return slot
-        end
-    end
-    return nil
-end
-
-local function has_in_vaults(id)
-    for _, vname in ipairs(active_vaults) do
-        local vault = get_inventory(vname)
-        if vault then
-            local ok, list = pcall(vault.list)
-            if ok and type(list) == "table" then
-                for _, item in pairs(list) do
-                    if type(item) == "table" and item.name == id and (item.count or 0) > 0 then
-                        return true
-                    end
-                end
-            end
-        end
-    end
-    return false
-end
-
--- порядок топлива: сначала выбранное, затем остальные виды (запасные)
-local function fuel_candidates(b)
-    local out = {}
-    local f = FUELS[b.fuel] or FUELS.coal
-    local primary = (type(b.item) == "string" and b.item ~= "") and b.item or f.item
-    out[1] = primary
-    for _, fu in pairs(FUELS) do
-        if fu.item ~= primary then
-            table.insert(out, fu.item)
-        end
-    end
-    return out
-end
-
-local function boiler_pass()
-    local boilers = cfg_boilers()
-    if #boilers == 0 then
-        boilerWarning = false
-        boilerStatus = {}
-        return 0
-    end
-    local now = os.epoch("utc")
-    local fed = 0
-    local anyWarn = false
-    boilerStatus = {}
-
-    for _, b in ipairs(boilers) do
-        local bName = resolve_name(b.name) or b.name
-        local boiler = get_inventory(bName)
-        local st = boilerState[b.name] or { lastPush = 0, primaryFed = false }
-        boilerState[b.name] = st
-
-        local candidates = fuel_candidates(b)
-        local primary = candidates[1]
-
-        -- есть ли выбранное топливо в вольтах
-        local primaryInVaults = has_in_vaults(primary)
-        if primaryInVaults then
-            st.primaryFed = true
-        end
-        -- предупреждение: primary когда-то кормили, а теперь его нет
-        st.warn = (not primaryInVaults) and st.primaryFed
-        if st.warn then anyWarn = true end
-
-        -- топливо в котле? (nil = не умеем читать)
-        local fuelOk = nil
-        if boiler then
-            local ok, list = pcall(boiler.list)
-            if ok and type(list) == "table" then
-                fuelOk = false
-                for _, item in pairs(list) do
-                    if type(item) == "table" then
-                        for _, cid in ipairs(candidates) do
-                            if item.name == cid then
-                                fuelOk = true
-                                break
-                            end
-                        end
-                        if fuelOk then break end
-                    end
-                end
-            end
-        end
-
-        local needFuel = false
-        if fuelOk == false then
-            needFuel = true
-        elseif fuelOk == nil then
-            local f = FUELS[b.fuel] or FUELS.coal
-            local interval = tonumber(b.interval) or f.burn or 80
-            if now - st.lastPush > math.max(10, interval - 15) * 1000 then
-                needFuel = true
-            end
-        end
-
-        if needFuel and now - st.lastPush > 5000 then
-            -- что толкаем: primary если есть; запасной -- только если
-            -- primary РАНЬШЕ кормили (значит, он кончился)
-            local toPush = nil
-            if primaryInVaults then
-                toPush = primary
-            elseif st.primaryFed then
-                for i = 2, #candidates do
-                    if has_in_vaults(candidates[i]) then
-                        toPush = candidates[i]
-                        break
-                    end
-                end
-            end
-
-            if toPush then
-                for _, vname in ipairs(active_vaults) do
-                    local vault = get_inventory(vname)
-                    if vault then
-                        local slot = find_slot(vault, toPush)
-                        if slot then
-                            local okp, m = pcall(vault.pushItems, bName, slot, 1)
-                            if okp and m and m > 0 then
-                                fed = fed + 1
-                                st.lastPush = now
-                                st.fedNow = true
-                                break
-                            end
-                        end
-                    end
-                end
-            end
-        end
-
-        -- строка статуса для экрана
-        local short = bName:gsub("^.*:", "")
-        local line
-        if fuelOk == true then
-            line = " " .. short .. ": fuel OK"
-        elseif st.fedNow then
-            line = " " .. short .. ": feeding"
-        elseif fuelOk == false then
-            line = " " .. short .. ": NO FUEL IN VAULTS"
-        else
-            line = " " .. short .. ": timer mode"
-        end
-        table.insert(boilerStatus, line)
-        st.fedNow = false
-    end
-
-    boilerWarning = anyWarn
-    return fed
-end
-
 -- ======================= ОТПРАВКА НА СЕРВЕР =======================
 local function send_to_server(payload)
     return api_post("/api/items", payload)
@@ -509,25 +331,6 @@ local function draw_status(found, totalVaults, kinds, total, logisticsStatus, se
     end
     if #missing > 0 and shown < rows then
         print("Missing: " .. table.concat(missing, ", "))
-    end
-
-    if #boilerStatus > 0 then
-        print("Boilers:")
-        for _, l in ipairs(boilerStatus) do
-            print(l)
-        end
-    end
-
-    -- если выбранное топливо котлов кончилось -- красное предупреждение
-    -- по центру экрана
-    if boilerWarning then
-        local w, hh = term.getSize()
-        local msg = "OUT OF FUEL FOR BOILERS"
-        term.setTextColor(colors.red)
-        term.setCursorPos(math.max(1, math.floor((w - #msg) / 2) + 1),
-            math.max(1, math.floor(hh / 2)))
-        term.write(msg)
-        term.setTextColor(colors.white)
     end
 end
 
@@ -649,34 +452,6 @@ local function check_balance_job()
     return true
 end
 
--- Ручная команда с сайта: запитать все котлы заданным предметом
-local function check_boiler_feed()
-    local data = api_get("/api/boilers/feed")
-    if not data or not data.requested then
-        return false
-    end
-    local item = data.item or "minecraft:coal_block"
-    local fed = 0
-    for _, b in ipairs(cfg_boilers()) do
-        local bName = resolve_name(b.name) or b.name
-        for _, vname in ipairs(active_vaults) do
-            local vault = get_inventory(vname)
-            if vault then
-                local slot = find_slot(vault, item)
-                if slot then
-                    local okp, m = pcall(vault.pushItems, bName, slot, 1)
-                    if okp and m and m > 0 then
-                        fed = fed + 1
-                    end
-                    break
-                end
-            end
-        end
-    end
-    api_post("/api/boilers/feed/done", { fed = fed, item = item })
-    return true
-end
-
 -- ======================= ГЛАВНЫЙ ЦИКЛ =======================
 local function main()
     term.clear()
@@ -701,17 +476,11 @@ local function main()
         lastLogistics = okL and (moved > 0 and ("moved " .. tostring(moved)) or "idle")
             or "error"
 
-        -- котлы: проверяем топливо раз в ~5 секунд
-        if tick % 5 == 0 then
-            pcall(boiler_pass)
-        end
-
         -- полный цикл раз в scan_interval
         if tick % CONFIG.scan_interval == 0 then
             local okCycle, errCycle = pcall(function()
                 server_ok = fetch_server_config()
                 check_balance_job()
-                check_boiler_feed()
 
                 -- автобалансировка: держим вольты заполненными равномерно
                 local nowMs = os.epoch("utc")

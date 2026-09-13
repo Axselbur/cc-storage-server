@@ -42,15 +42,6 @@ CONFIG_DEFAULTS = {
     "auto_balance": True,    # keep vaults evenly filled automatically
     "auto_balance_interval": 600,  # seconds between auto-balance runs
     "vault_capacity": 4096,  # assumed items per vault (for the monitor fill bars)
-    "boilers": [],           # steam boilers: [{"name", "fuel", "item"?, "interval"?}]
-}
-
-# топливо для котлов: burn = сколько секунд горит 1 штука (запасной таймер,
-# если котёл нельзя прочитать как инвентарь; обычно работает проверка слота)
-FUELS = {
-    "coal": {"item": "minecraft:coal", "burn": 80},
-    "coal_block": {"item": "minecraft:coal_block", "burn": 800},
-    "biomass": {"item": "create:biomass_pellet", "burn": 120},
 }
 
 LOCK = threading.RLock()
@@ -72,16 +63,6 @@ BALANCE_STATE = {
     "message": "",
     "requested_at": None,
     "updated_at": None,
-}
-
-# ручная команда "запитать котлы": сайт ставит запрос, ПК подхватывает
-BOILER_FEED = {
-    "requested": False,
-    "item": None,
-    "requested_at": None,
-    "last_fed": 0,
-    "last_item": "",
-    "done_at": None,
 }
 
 # ---------------- users / sessions / bans ----------------
@@ -1297,12 +1278,6 @@ class Handler(BaseHTTPRequestHandler):
                 with LOCK:
                     self._json(200, dict(BALANCE_STATE))
 
-            elif path == "/api/boilers/feed":
-                if not self._require_device_or_login():
-                    return
-                with LOCK:
-                    self._json(200, dict(BOILER_FEED))
-
             elif path == "/api/users":
                 if not self._require_admin():
                     return
@@ -1364,26 +1339,6 @@ class Handler(BaseHTTPRequestHandler):
                     BALANCE_STATE["requested_at"] = time.time()
                     BALANCE_STATE["updated_at"] = time.time()
                 self._json(200, {"ok": True, "status": "requested"})
-            elif path == "/api/boilers/feed":
-                if not self._require_login():
-                    return
-                data = self._read_json() or {}
-                item = str(data.get("item") or "minecraft:coal_block").strip()
-                with LOCK:
-                    BOILER_FEED["requested"] = True
-                    BOILER_FEED["item"] = item
-                    BOILER_FEED["requested_at"] = time.time()
-                self._json(200, {"ok": True, "item": item})
-            elif path == "/api/boilers/feed/done":
-                if not self._require_device_or_login():
-                    return
-                data = self._read_json() or {}
-                with LOCK:
-                    BOILER_FEED["requested"] = False
-                    BOILER_FEED["last_fed"] = int(data.get("fed") or 0)
-                    BOILER_FEED["last_item"] = str(data.get("item") or "")
-                    BOILER_FEED["done_at"] = time.time()
-                self._json(200, {"ok": True})
             elif path == "/api/balance/progress":
                 if not self._require_device_or_login():
                     return
@@ -1433,27 +1388,7 @@ class Handler(BaseHTTPRequestHandler):
                             continue
                         v = data[k]
                         default = CONFIG_DEFAULTS[k]
-                        if k == "boilers":
-                            out = []
-                            if isinstance(v, list):
-                                for b in v:
-                                    if not isinstance(b, dict):
-                                        continue
-                                    name = str(b.get("name") or "").strip()
-                                    if not name:
-                                        continue
-                                    fuel = str(b.get("fuel") or "coal")
-                                    if fuel not in FUELS:
-                                        fuel = "coal"
-                                    item = str(b.get("item") or "").strip()
-                                    try:
-                                        interval = max(5, int(b.get("interval") or 0))
-                                    except (TypeError, ValueError):
-                                        interval = 0
-                                    out.append({"name": name, "fuel": fuel,
-                                                "item": item, "interval": interval})
-                            CONFIG[k] = out
-                        elif isinstance(default, list):
+                        if isinstance(default, list):
                             CONFIG[k] = [str(x).strip() for x in v
                                          if str(x).strip()] if isinstance(v, list) else []
                         elif isinstance(default, bool):

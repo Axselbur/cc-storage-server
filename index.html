@@ -248,7 +248,7 @@ header {
 .siloRow input { width: 90px; }
 
 /* ---------- изготовление (left-docked) ---------- */
-#craftModal, #boilerModal {
+#craftModal {
   position: fixed; left: 0; top: 0; bottom: 0;
   width: 600px; max-width: 92vw;
   background: var(--panel);
@@ -289,7 +289,6 @@ header {
     <button id="btnBalance">🔀 Выровнять</button>
     <span id="balanceStatus" class="conn"></span>
     <button id="btnCraft">➕ Изготовление</button>
-    <button id="btnBoilers">🔥 Котлы</button>
     <button id="btnSettings">⚙️ Настройки</button>
     <span id="userBadge" class="badge muted"></span>
     <button id="btnLogout" title="Выйти">⎋</button>
@@ -515,29 +514,6 @@ header {
     <button id="cmSave">Сохранить</button>
     <div id="cmMsg" class="muted" style="margin-top:8px;min-height:14px;font-size:12px;"></div>
   </div>
-</div>
-
-<div id="boilerModal" class="hidden">
-  <h2>🔥 Котлы</h2>
-  <div id="boilerListBox"></div>
-  <div class="vrow">
-    <input type="text" id="newBoilerName" placeholder="createpropulsion:solid_block_entity_0">
-    <select id="newBoilerFuel" style="width:140px;">
-      <option value="coal">Уголь (80с)</option>
-      <option value="coal_block">Блок угля (800с)</option>
-      <option value="biomass">Паллета биомассы (120с)</option>
-    </select>
-    <button id="btnAddBoiler">+ Добавить</button>
-  </div>
-  <div class="inghint">
-    Раз в ~5 сек ПК проверяет топливный слот котла: пусто — толкает 1 штуку
-    топлива из вольтов. Если котёл нельзя прочитать — кормит по таймеру
-    (время горения, с запасом). Предмет топлива и интервал можно поправить
-    у каждого котла вручную.
-  </div>
-  <button id="btnSaveBoilers">Сохранить</button>
-  <button id="btnFeedBoilers" style="margin-left:8px;">⚡ Запитать все блоком угля</button>
-  <div id="boilerMsg" class="muted" style="margin-top:8px;min-height:14px;font-size:12px;"></div>
 </div>
 
 <script>
@@ -1252,88 +1228,6 @@ header {
     $("balanceStatus").textContent = txt;
   }
 
-  // ---------------- котлы ----------------
-  var FUELS = {
-    coal: { item: "minecraft:coal", burn: 80 },
-    coal_block: { item: "minecraft:coal_block", burn: 800 },
-    biomass: { item: "create:biomass_pellet", burn: 120 }
-  };
-  var draftBoilers = [];
-
-  function openBoilers() {
-    $("boilerModal").classList.remove("hidden");
-    $("craftModal").classList.add("hidden");
-    $("boilerMsg").textContent = "";
-    api("/api/config").then(function (cfg) {
-      draftBoilers = (cfg.boilers || []).map(function (b) {
-        return {
-          name: b.name || "",
-          fuel: b.fuel || "coal",
-          item: b.item || FUELS[b.fuel || "coal"].item,
-          interval: b.interval || 0
-        };
-      });
-      renderBoilerList();
-    }).catch(function () {
-      draftBoilers = [];
-      renderBoilerList();
-    });
-  }
-
-  function renderBoilerList() {
-    var box = $("boilerListBox");
-    box.innerHTML = "";
-    draftBoilers.forEach(function (b, idx) {
-      var row = document.createElement("div");
-      row.className = "vrow";
-      row.style.flexWrap = "wrap";
-      row.innerHTML =
-        '<input class="bName" placeholder="имя котла" value="' + esc(b.name) + '" style="flex:1;">' +
-        '<select class="bFuel" style="width:130px;">' +
-        '<option value="coal"' + (b.fuel === "coal" ? " selected" : "") + ">Уголь</option>" +
-        '<option value="coal_block"' + (b.fuel === "coal_block" ? " selected" : "") + ">Блок угля</option>" +
-        '<option value="biomass"' + (b.fuel === "biomass" ? " selected" : "") + ">Биомасса</option>" +
-        "</select>" +
-        '<input class="bItem" title="предмет топлива (id)" value="' + esc(b.item) + '" style="width:170px;">' +
-        '<input class="bInt" type="number" title="интервал, сек (0 = время горения)" value="' + (b.interval || 0) + '" style="width:70px;">' +
-        '<button class="bDel">✕</button>';
-      var nameEl = row.querySelector(".bName");
-      var fuelEl = row.querySelector(".bFuel");
-      var itemEl = row.querySelector(".bItem");
-      var intEl = row.querySelector(".bInt");
-      nameEl.addEventListener("input", function () { b.name = nameEl.value.trim(); });
-      fuelEl.addEventListener("change", function () {
-        b.fuel = fuelEl.value;
-        if (!itemEl.value || FUELS[b.fuel]) {
-          b.item = FUELS[b.fuel].item;
-          itemEl.value = b.item;
-        }
-      });
-      itemEl.addEventListener("input", function () { b.item = itemEl.value.trim(); });
-      intEl.addEventListener("input", function () { b.interval = parseInt(intEl.value, 10) || 0; });
-      row.querySelector(".bDel").addEventListener("click", function () {
-        draftBoilers.splice(idx, 1);
-        renderBoilerList();
-      });
-      box.appendChild(row);
-    });
-    if (!draftBoilers.length) {
-      box.innerHTML = '<div class="muted" style="padding:10px;">Котлов пока нет.</div>';
-    }
-  }
-
-  function saveBoilers() {
-    var boilers = draftBoilers.filter(function (b) { return !!b.name; }).map(function (b) {
-      return { name: b.name, fuel: b.fuel, item: b.item, interval: b.interval || 0 };
-    });
-    api("/api/config", { method: "POST", body: { boilers: boilers } })
-      .then(function (r) {
-        config = r.config || config;
-        $("boilerMsg").textContent = "✅ Сохранено";
-      })
-      .catch(function (e) { $("boilerMsg").textContent = "Ошибка: " + e.message; });
-  }
-
   // ---------------- refresh ----------------
   async function refresh() {
     try { state = await api("/api/state"); } catch (e) { state = null; }
@@ -1360,23 +1254,6 @@ header {
   });
 
   $("btnCraft").addEventListener("click", openCraftModal);
-  $("btnBoilers").addEventListener("click", openBoilers);
-  $("btnAddBoiler").addEventListener("click", function () {
-    var name = $("newBoilerName").value.trim();
-    if (!name) { alert("Введи имя котла"); return; }
-    var fuel = $("newBoilerFuel").value;
-    draftBoilers.push({ name: name, fuel: fuel, item: FUELS[fuel].item, interval: 0 });
-    $("newBoilerName").value = "";
-    renderBoilerList();
-  });
-  $("btnSaveBoilers").addEventListener("click", saveBoilers);
-  $("btnFeedBoilers").addEventListener("click", function () {
-    api("/api/boilers/feed", { method: "POST", body: { item: "minecraft:coal_block" } })
-      .then(function () {
-        $("boilerMsg").textContent = "✅ Команда отправлена: ПК запитает котлы в течение 20 сек.";
-      })
-      .catch(function (e) { $("boilerMsg").textContent = "Ошибка: " + e.message; });
-  });
   $("cmClose").addEventListener("click", closeCraftModal);
   $("cmTabList").addEventListener("click", function () { switchCraftTab("list"); });
   $("cmTabAdd").addEventListener("click", function () { openCraftAdd(); });
