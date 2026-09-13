@@ -113,6 +113,6 @@
     "auto_target": 128,
     "destination": "create_connected:item_silo_102",
     "mechanism_input": "create:depot",
-    "mechanism_output": "create:depot"
+    "mechanism_output": "create:depot_9"
   }
 ]
