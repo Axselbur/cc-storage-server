@@ -74,6 +74,16 @@ BALANCE_STATE = {
     "updated_at": None,
 }
 
+# ручная команда "запитать котлы": сайт ставит запрос, ПК подхватывает
+BOILER_FEED = {
+    "requested": False,
+    "item": None,
+    "requested_at": None,
+    "last_fed": 0,
+    "last_item": "",
+    "done_at": None,
+}
+
 # ---------------- users / sessions / bans ----------------
 USERS_FILE = os.path.join(BASE_DIR, "users.json")
 USERS = {"users": {}, "bans": {}}   # users.json: {"users": {name: {...}}, "bans": {ip: {...}}}
@@ -1287,6 +1297,12 @@ class Handler(BaseHTTPRequestHandler):
                 with LOCK:
                     self._json(200, dict(BALANCE_STATE))
 
+            elif path == "/api/boilers/feed":
+                if not self._require_device_or_login():
+                    return
+                with LOCK:
+                    self._json(200, dict(BOILER_FEED))
+
             elif path == "/api/users":
                 if not self._require_admin():
                     return
@@ -1348,6 +1364,26 @@ class Handler(BaseHTTPRequestHandler):
                     BALANCE_STATE["requested_at"] = time.time()
                     BALANCE_STATE["updated_at"] = time.time()
                 self._json(200, {"ok": True, "status": "requested"})
+            elif path == "/api/boilers/feed":
+                if not self._require_login():
+                    return
+                data = self._read_json() or {}
+                item = str(data.get("item") or "minecraft:coal_block").strip()
+                with LOCK:
+                    BOILER_FEED["requested"] = True
+                    BOILER_FEED["item"] = item
+                    BOILER_FEED["requested_at"] = time.time()
+                self._json(200, {"ok": True, "item": item})
+            elif path == "/api/boilers/feed/done":
+                if not self._require_device_or_login():
+                    return
+                data = self._read_json() or {}
+                with LOCK:
+                    BOILER_FEED["requested"] = False
+                    BOILER_FEED["last_fed"] = int(data.get("fed") or 0)
+                    BOILER_FEED["last_item"] = str(data.get("item") or "")
+                    BOILER_FEED["done_at"] = time.time()
+                self._json(200, {"ok": True})
             elif path == "/api/balance/progress":
                 if not self._require_device_or_login():
                     return

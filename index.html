@@ -536,6 +536,7 @@ header {
     у каждого котла вручную.
   </div>
   <button id="btnSaveBoilers">Сохранить</button>
+  <button id="btnFeedBoilers" style="margin-left:8px;">⚡ Запитать все блоком угля</button>
   <div id="boilerMsg" class="muted" style="margin-top:8px;min-height:14px;font-size:12px;"></div>
 </div>
 
@@ -1369,6 +1370,13 @@ header {
     renderBoilerList();
   });
   $("btnSaveBoilers").addEventListener("click", saveBoilers);
+  $("btnFeedBoilers").addEventListener("click", function () {
+    api("/api/boilers/feed", { method: "POST", body: { item: "minecraft:coal_block" } })
+      .then(function () {
+        $("boilerMsg").textContent = "✅ Команда отправлена: ПК запитает котлы в течение 20 сек.";
+      })
+      .catch(function (e) { $("boilerMsg").textContent = "Ошибка: " + e.message; });
+  });
   $("cmClose").addEventListener("click", closeCraftModal);
   $("cmTabList").addEventListener("click", function () { switchCraftTab("list"); });
   $("cmTabAdd").addEventListener("click", function () { openCraftAdd(); });

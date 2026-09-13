@@ -649,6 +649,34 @@ local function check_balance_job()
     return true
 end
 
+-- Ручная команда с сайта: запитать все котлы заданным предметом
+local function check_boiler_feed()
+    local data = api_get("/api/boilers/feed")
+    if not data or not data.requested then
+        return false
+    end
+    local item = data.item or "minecraft:coal_block"
+    local fed = 0
+    for _, b in ipairs(cfg_boilers()) do
+        local bName = resolve_name(b.name) or b.name
+        for _, vname in ipairs(active_vaults) do
+            local vault = get_inventory(vname)
+            if vault then
+                local slot = find_slot(vault, item)
+                if slot then
+                    local okp, m = pcall(vault.pushItems, bName, slot, 1)
+                    if okp and m and m > 0 then
+                        fed = fed + 1
+                    end
+                    break
+                end
+            end
+        end
+    end
+    api_post("/api/boilers/feed/done", { fed = fed, item = item })
+    return true
+end
+
 -- ======================= ГЛАВНЫЙ ЦИКЛ =======================
 local function main()
     term.clear()
@@ -683,6 +711,7 @@ local function main()
             local okCycle, errCycle = pcall(function()
                 server_ok = fetch_server_config()
                 check_balance_job()
+                check_boiler_feed()
 
                 -- автобалансировка: держим вольты заполненными равномерно
                 local nowMs = os.epoch("utc")
