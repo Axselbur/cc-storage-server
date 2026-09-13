@@ -278,6 +278,7 @@ end
 
 local boilerState = {}     -- name -> { lastPush, primaryFed, warn }
 local boilerWarning = false
+local boilerStatus = {}    -- строки статуса для экрана
 
 local function find_slot(inv, id)
     local ok, list = pcall(inv.list)
@@ -325,11 +326,13 @@ local function boiler_pass()
     local boilers = cfg_boilers()
     if #boilers == 0 then
         boilerWarning = false
+        boilerStatus = {}
         return 0
     end
     local now = os.epoch("utc")
     local fed = 0
     local anyWarn = false
+    boilerStatus = {}
 
     for _, b in ipairs(boilers) do
         local bName = resolve_name(b.name) or b.name
@@ -405,6 +408,7 @@ local function boiler_pass()
                             if okp and m and m > 0 then
                                 fed = fed + 1
                                 st.lastPush = now
+                                st.fedNow = true
                                 break
                             end
                         end
@@ -412,6 +416,21 @@ local function boiler_pass()
                 end
             end
         end
+
+        -- строка статуса для экрана
+        local short = bName:gsub("^.*:", "")
+        local line
+        if fuelOk == true then
+            line = " " .. short .. ": fuel OK"
+        elseif st.fedNow then
+            line = " " .. short .. ": feeding"
+        elseif fuelOk == false then
+            line = " " .. short .. ": NO FUEL IN VAULTS"
+        else
+            line = " " .. short .. ": timer mode"
+        end
+        table.insert(boilerStatus, line)
+        st.fedNow = false
     end
 
     boilerWarning = anyWarn
@@ -490,6 +509,13 @@ local function draw_status(found, totalVaults, kinds, total, logisticsStatus, se
     end
     if #missing > 0 and shown < rows then
         print("Missing: " .. table.concat(missing, ", "))
+    end
+
+    if #boilerStatus > 0 then
+        print("Boilers:")
+        for _, l in ipairs(boilerStatus) do
+            print(l)
+        end
     end
 
     -- если выбранное топливо котлов кончилось -- красное предупреждение
