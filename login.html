@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Вход // CC Storage Server</title>
+<style>
+:root {
+  --bg: #0a0d12; --panel: #12161d; --panel2: #1a1f28; --slot: #0e1218;
+  --border: #2a3342; --text: #d6e2ee; --muted: #7d8da1;
+  --green: #58d68d; --red: #e74c3c; --gold: #e6c35c;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: radial-gradient(900px 500px at 50% -10%, #14202f 0%, var(--bg) 60%);
+  color: var(--text);
+  font-family: "Segoe UI", system-ui, sans-serif;
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+}
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 34px;
+  width: 360px;
+  box-shadow: 0 10px 50px rgba(0,0,0,.5);
+}
+h1 { font-size: 18px; letter-spacing: 2px; margin-bottom: 4px; }
+.sub { color: var(--muted); font-size: 12px; margin-bottom: 24px; }
+label { display: block; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); margin-bottom: 5px; }
+input {
+  width: 100%; background: var(--slot); border: 1px solid var(--border);
+  color: var(--text); border-radius: 6px; padding: 10px 12px; font-size: 13px;
+  outline: none; margin-bottom: 14px;
+}
+input:focus { border-color: var(--gold); }
+button {
+  width: 100%; background: var(--panel2); color: var(--text);
+  border: 1px solid var(--gold); border-radius: 6px; padding: 11px;
+  cursor: pointer; font-size: 14px; letter-spacing: 1px;
+}
+button:hover { background: rgba(230,195,92,0.12); }
+.err { color: var(--red); font-size: 12px; margin-top: 12px; min-height: 15px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>CC STORAGE SERVER</h1>
+  <div class="sub">вход в панель управления</div>
+  <label>Логин</label>
+  <input type="text" id="username" placeholder="admin" autocomplete="username" autofocus>
+  <label>Пароль</label>
+  <input type="password" id="password" placeholder="••••••••" autocomplete="current-password">
+  <button id="btnLogin">ВОЙТИ</button>
+  <div class="err" id="err"></div>
+</div>
+<script>
+(function () {
+  // уже залогинен -> сразу в панель
+  fetch("/api/me", { credentials: "same-origin" })
+    .then(function (r) { if (r.ok) location.replace("/"); })
+    .catch(function () {});
+
+  function tryLogin() {
+    var err = document.getElementById("err");
+    err.textContent = "";
+    var username = document.getElementById("username").value.trim();
+    var password = document.getElementById("password").value;
+    if (!username || !password) { err.textContent = "Введи логин и пароль"; return; }
+    fetch("/login", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: username, password: password })
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) {
+        if (r.ok) { location.replace("/"); }
+        else { err.textContent = d.error || ("Ошибка " + r.status); }
+      });
+    }).catch(function () { err.textContent = "Сервер недоступен"; });
+  }
+
+  document.getElementById("btnLogin").addEventListener("click", tryLogin);
+  document.getElementById("password").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") tryLogin();
+  });
+})();
+</script>
+</body>
+</html>

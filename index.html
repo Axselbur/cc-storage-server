@@ -290,6 +290,8 @@ header {
     <span id="balanceStatus" class="conn"></span>
     <button id="btnCraft">➕ Изготовление</button>
     <button id="btnSettings">⚙️ Настройки</button>
+    <span id="userBadge" class="badge muted"></span>
+    <button id="btnLogout" title="Выйти">⎋</button>
   </div>
 </header>
 
@@ -411,6 +413,41 @@ header {
       <label>Вместимость одного вольта (для шкалы заполнения на мониторе)</label>
       <input type="number" id="cfgVaultCapacity" min="1" value="4096" style="width:140px;">
       <div class="inghint" style="color:var(--muted);font-size:11px;">Сколько предметов влезает в один вольт/силос твоего тира. 0 шкала не зависит от вместимости.</div>
+    </div>
+
+    <div id="adminSection" class="hidden">
+      <hr style="border-color:var(--border);margin:16px 0;">
+
+      <div class="sfield">
+        <label style="color:var(--gold);">👥 Пользователи</label>
+        <div id="userListBox"></div>
+        <div class="vrow">
+          <input type="text" id="newUserName" placeholder="логин">
+          <input type="password" id="newUserPass" placeholder="пароль">
+          <select id="newUserRole" style="width:90px;">
+            <option value="user">user</option>
+            <option value="admin">admin</option>
+          </select>
+          <button id="btnAddUser">+</button>
+        </div>
+      </div>
+
+      <div class="sfield">
+        <label style="color:var(--red);">🚫 Баны по IP</label>
+        <div id="banListBox"></div>
+        <div class="vrow">
+          <input type="text" id="newBanIp" placeholder="IP адрес">
+          <button id="btnAddBan">Забанить</button>
+        </div>
+      </div>
+
+      <div class="sfield">
+        <label>🔑 Сменить свой пароль</label>
+        <div class="vrow">
+          <input type="password" id="ownNewPass" placeholder="новый пароль">
+          <button id="btnChangeOwnPass">Сменить</button>
+        </div>
+      </div>
     </div>
 
     <button id="btnSaveConfig">Сохранить</button>
@@ -571,6 +608,10 @@ header {
     });
     var data = {};
     try { data = await res.json(); } catch (e) {}
+    if (res.status === 401) {
+      location.href = "/login";
+      throw new Error("unauthorized");
+    }
     if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
     return data;
   }
@@ -892,6 +933,73 @@ header {
     }).catch(function () {
       renderSettingsForm({ vaults: [], packagers: [], turtle_name: "", packager_target: "", buffer_chest: "" });
     });
+    var isAdmin = currentUser && currentUser.role === "admin";
+    $("adminSection").classList.toggle("hidden", !isAdmin);
+    if (isAdmin) {
+      renderUsersBox();
+      renderBansBox();
+    }
+  }
+
+  // ---- пользователи и баны (админ) ----
+  function renderUsersBox() {
+    var box = $("userListBox");
+    box.innerHTML = "";
+    api("/api/users").then(function (d) {
+      d.users.forEach(function (u) {
+        var row = document.createElement("div");
+        row.className = "vrow";
+        row.innerHTML = '<div class="vName" style="flex:1;margin-bottom:0;">' + esc(u.username) +
+          ' <span class="muted">[' + esc(u.role) + "]</span></div>" +
+          '<button class="uPass" title="сменить пароль">🔑</button>' +
+          '<button class="uKick" title="кикнуть с аккаунта">⚡</button>' +
+          '<button class="uDel" title="удалить">🗑</button>';
+        row.querySelector(".uPass").addEventListener("click", function () {
+          var p = prompt("Новый пароль для " + u.username);
+          if (p) {
+            api("/api/users/password", { method: "POST", body: { username: u.username, password: p } })
+              .then(function () { alert("Пароль изменён"); })
+              .catch(function (e) { alert(e.message); });
+          }
+        });
+        row.querySelector(".uKick").addEventListener("click", function () {
+          api("/api/sessions/kick", { method: "POST", body: { username: u.username } })
+            .then(function (r) { alert("Активных сессий удалено: " + (r.removed || 0)); })
+            .catch(function (e) { alert(e.message); });
+        });
+        row.querySelector(".uDel").addEventListener("click", function () {
+          if (!confirm("Удалить пользователя " + u.username + "?")) return;
+          api("/api/users?id=" + encodeURIComponent(u.username), { method: "DELETE" })
+            .then(renderUsersBox).catch(function (e) { alert(e.message); });
+        });
+        box.appendChild(row);
+      });
+    }).catch(function (e) {
+      box.innerHTML = '<span class="muted">ошибка: ' + e.message + "</span>";
+    });
+  }
+
+  function renderBansBox() {
+    var box = $("banListBox");
+    box.innerHTML = "";
+    api("/api/bans").then(function (d) {
+      var ips = Object.keys(d.bans || {});
+      if (!ips.length) {
+        box.innerHTML = '<span class="muted">банов нет</span>';
+        return;
+      }
+      ips.forEach(function (ip) {
+        var row = document.createElement("div");
+        row.className = "vrow";
+        row.innerHTML = '<div class="vName" style="flex:1;margin-bottom:0;">' + esc(ip) + "</div>" +
+          '<button class="uUnban">разбанить</button>';
+        row.querySelector(".uUnban").addEventListener("click", function () {
+          api("/api/bans?id=" + encodeURIComponent(ip), { method: "DELETE" })
+            .then(renderBansBox).catch(function (e) { alert(e.message); });
+        });
+        box.appendChild(row);
+      });
+    }).catch(function () {});
   }
 
   async function saveSettings() {
@@ -1207,6 +1315,43 @@ header {
   }
 
   // ---------------- init ----------------
+  var currentUser = null;
+  api("/api/me").then(function (me) {
+    currentUser = me;
+    $("userBadge").textContent = "👤 " + me.username + (me.role === "admin" ? " (admin)" : "");
+    $("userBadge").className = "badge " + (me.role === "admin" ? "ok" : "muted");
+  }).catch(function () {
+    location.href = "/login";
+  });
+
+  $("btnLogout").addEventListener("click", function () { location.href = "/logout"; });
+  $("btnAddUser").addEventListener("click", function () {
+    var name = $("newUserName").value.trim();
+    var pass = $("newUserPass").value;
+    var role = $("newUserRole").value;
+    if (!name || !pass) { alert("Введи логин и пароль"); return; }
+    api("/api/users", { method: "POST", body: { username: name, password: pass, role: role } })
+      .then(function () {
+        $("newUserName").value = ""; $("newUserPass").value = "";
+        renderUsersBox();
+      })
+      .catch(function (e) { alert(e.message); });
+  });
+  $("btnAddBan").addEventListener("click", function () {
+    var ip = $("newBanIp").value.trim();
+    if (!ip) { alert("Введи IP"); return; }
+    api("/api/bans", { method: "POST", body: { ip: ip } })
+      .then(function () { $("newBanIp").value = ""; renderBansBox(); })
+      .catch(function (e) { alert(e.message); });
+  });
+  $("btnChangeOwnPass").addEventListener("click", function () {
+    var p = $("ownNewPass").value;
+    if (!p) { alert("Введи новый пароль"); return; }
+    api("/api/users/password", { method: "POST", body: { password: p } })
+      .then(function () { $("ownNewPass").value = ""; alert("Пароль изменён"); })
+      .catch(function (e) { alert(e.message); });
+  });
+
   api("/api/config").then(function (cfg) { config = cfg; }).catch(function () {});
   api("/api/allitems").then(function (d) { allItems = d.items || []; renderAll(); }).catch(function () {});
   refresh();

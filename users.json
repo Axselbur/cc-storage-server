@@ -1,0 +1,10 @@
+{
+  "users": {
+    "admin": {
+      "salt": "bb3788bf4ee9863dd31c3836d21c04c5",
+      "hash": "8c43fd5878c37b645ca16c74285ea3741581ac0a7fdbdbe6babf2b79c6696829",
+      "role": "admin"
+    }
+  },
+  "bans": {}
+}

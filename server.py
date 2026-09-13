@@ -7,9 +7,12 @@ Part 1: data loading and state API.
 Python 3 stdlib only. Hosted on Render free tier, deployed from GitHub.
 """
 import base64
+import hashlib
 import hmac
 import json
 import os
+import re
+import secrets
 import sys
 import threading
 import time
@@ -61,6 +64,52 @@ BALANCE_STATE = {
     "requested_at": None,
     "updated_at": None,
 }
+
+# ---------------- users / sessions / bans ----------------
+USERS_FILE = os.path.join(BASE_DIR, "users.json")
+USERS = {"users": {}, "bans": {}}   # users.json: {"users": {name: {...}}, "bans": {ip: {...}}}
+SESSIONS = {}                       # token -> {"username", "ip", "created"}
+
+
+def hash_password(password, salt_hex):
+    return hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), 100_000
+    ).hex()
+
+
+def load_users():
+    global USERS
+    if os.path.exists(USERS_FILE):
+        try:
+            with open(USERS_FILE, "r", encoding="utf-8-sig") as fh:
+                data = json.load(fh)
+            if isinstance(data, dict):
+                USERS = {
+                    "users": data.get("users") or {},
+                    "bans": data.get("bans") or {},
+                }
+                return
+        except Exception:
+            pass
+    salt = secrets.token_hex(16)
+    USERS = {
+        "users": {"admin": {"salt": salt, "hash": hash_password("password", salt),
+                            "role": "admin"}},
+        "bans": {},
+    }
+    save_users()
+    log("Created users.json: admin / password (смени пароль на сайте!)")
+
+
+def save_users():
+    try:
+        tmp = USERS_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(USERS, fh, ensure_ascii=False, indent=2)
+        os.replace(tmp, USERS_FILE)
+    except Exception as e:
+        log("save_users failed: %s" % e)
+    _github_commit_file_async("users.json", "Update users")
 
 TEXTURE_INDEX = {}       # item_id -> png path
 RECIPES_BY_RESULT = {}   # item_id -> [recipe]
@@ -1041,33 +1090,59 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return None
 
-    # ---- auth ----
-    def _is_admin(self):
-        if not ADMIN_PASSWORD:
-            return True
-        auth = self.headers.get("Authorization", "")
-        if not auth.startswith("Basic "):
-            return False
-        try:
-            _, _, pwd = base64.b64decode(auth[6:]).decode("utf-8", "replace").partition(":")
-        except Exception:
-            return False
-        return hmac.compare_digest(pwd, ADMIN_PASSWORD)
+    # ---- auth (сессии + пользователи) ----
+    def _client_ip(self):
+        xff = self.headers.get("X-Forwarded-For", "")
+        if xff:
+            return xff.split(",")[0].strip()
+        return self.client_address[0]
+
+    def _is_banned(self):
+        return self._client_ip() in USERS.get("bans", {})
+
+    @staticmethod
+    def _cookie_value(header, name):
+        m = re.search(r"(?:^|;\s*)%s=([a-zA-Z0-9]+)" % re.escape(name), header or "")
+        return m.group(1) if m else None
+
+    def _session_user(self):
+        token = self._cookie_value(self.headers.get("Cookie", ""), "session")
+        if not token:
+            return None
+        sess = SESSIONS.get(token)
+        return sess["username"] if sess else None
 
     def _is_device(self):
         if not DEVICE_KEY:
             return True
         return hmac.compare_digest(self.headers.get("X-Device-Key", ""), DEVICE_KEY)
 
-    def _require_admin(self):
-        if self._is_admin():
+    def _require_login(self):
+        if self._is_banned():
+            self._json(403, {"error": "banned"})
+            return False
+        if self._session_user():
             return True
-        self._send(401, json.dumps({"error": "unauthorized"}),
-                   extra={"WWW-Authenticate": 'Basic realm="CCStorage"'})
+        self._json(401, {"error": "unauthorized"})
         return False
 
-    def _require_device_or_admin(self):
-        if self._is_device() or self._is_admin():
+    def _require_admin(self):
+        if self._is_banned():
+            self._json(403, {"error": "banned"})
+            return False
+        u = self._session_user()
+        if u and USERS["users"].get(u, {}).get("role") == "admin":
+            return True
+        self._json(403, {"error": "admin only"})
+        return False
+
+    def _require_device_or_login(self):
+        if self._is_device():
+            return True
+        if self._is_banned():
+            self._json(403, {"error": "banned"})
+            return False
+        if self._session_user():
             return True
         self._json(403, {"error": "forbidden"})
         return False
@@ -1087,12 +1162,35 @@ class Handler(BaseHTTPRequestHandler):
         qs = parse_qs(parsed.query)
         try:
             if path == "/":
-                if not self._require_admin():
+                if self._session_user():
+                    self._serve_file("index.html", "text/html; charset=utf-8")
+                else:
+                    self._send(302, "", "text/html; charset=utf-8",
+                               {"Location": "/login"})
+
+            elif path == "/login":
+                if self._session_user():
+                    self._send(302, "", "text/html; charset=utf-8",
+                               {"Location": "/"})
+                else:
+                    self._serve_file("login.html", "text/html; charset=utf-8")
+
+            elif path == "/logout":
+                token = self._cookie_value(self.headers.get("Cookie", ""), "session")
+                if token:
+                    SESSIONS.pop(token, None)
+                self._send(302, "", "text/html; charset=utf-8",
+                           {"Location": "/login"})
+
+            elif path == "/api/me":
+                if not self._require_login():
                     return
-                self._serve_file("index.html", "text/html; charset=utf-8")
+                u = self._session_user()
+                self._json(200, {"username": u,
+                                 "role": USERS["users"][u]["role"]})
 
             elif path == "/api/state":
-                if not self._require_admin():
+                if not self._require_login():
                     return
                 with LOCK:
                     st = dict(STATE)
@@ -1107,7 +1205,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, resp)
 
             elif path == "/api/info":
-                if not self._require_admin():
+                if not self._require_login():
                     return
                 self._json(200, {
                     "stats": {"textures": len(TEXTURE_INDEX),
@@ -1117,7 +1215,7 @@ class Handler(BaseHTTPRequestHandler):
                 })
 
             elif path == "/api/recipes":
-                if not self._require_admin():
+                if not self._require_login():
                     return
                 item = (qs.get("item") or [""])[0]
                 self._json(200, {
@@ -1126,7 +1224,7 @@ class Handler(BaseHTTPRequestHandler):
                 })
 
             elif path == "/api/texture":
-                if not self._require_admin():
+                if not self._require_login():
                     return
                 item = (qs.get("id") or [""])[0]
                 fp = TEXTURE_INDEX.get(item)
@@ -1138,24 +1236,24 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(404, {"error": "no texture"})
 
             elif path == "/api/allitems":
-                if not self._require_admin():
+                if not self._require_login():
                     return
                 self._json(200, {"items": ALL_ITEMS})
 
             elif path == "/api/config":
-                if not self._require_device_or_admin():
+                if not self._require_device_or_login():
                     return
                 with LOCK:
                     self._json(200, dict(CONFIG))
 
             elif path == "/api/orders":
-                if not self._require_device_or_admin():
+                if not self._require_device_or_login():
                     return
                 with LOCK:
                     self._json(200, {"orders": ORDERS[:20]})
 
             elif path == "/api/orders/next":
-                if not self._require_device_or_admin():
+                if not self._require_device_or_login():
                     return
                 with LOCK:
                     CRAFTER_STATE["last_seen"] = time.time()
@@ -1169,16 +1267,29 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"order": order})
 
             elif path == "/api/custom-recipes":
-                if not self._require_admin():
+                if not self._require_login():
                     return
                 with LOCK:
                     self._json(200, {"recipes": CUSTOM_RECIPES})
 
             elif path == "/api/balance":
-                if not self._require_device_or_admin():
+                if not self._require_device_or_login():
                     return
                 with LOCK:
                     self._json(200, dict(BALANCE_STATE))
+
+            elif path == "/api/users":
+                if not self._require_admin():
+                    return
+                self._json(200, {
+                    "users": [{"username": k, "role": v.get("role", "user")}
+                              for k, v in USERS["users"].items()],
+                })
+
+            elif path == "/api/bans":
+                if not self._require_admin():
+                    return
+                self._json(200, {"bans": USERS.get("bans", {})})
 
             elif path == "/main.lua":
                 self._serve_file("main.lua", "text/plain; charset=utf-8")
@@ -1197,27 +1308,29 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         try:
-            if path == "/api/items" or path == "/":
-                if not self._require_device_or_admin():
+            if path == "/login":
+                self._handle_login()
+            elif path == "/api/items" or path == "/":
+                if not self._require_device_or_login():
                     return
                 self._handle_items()
             elif path == "/api/order":
-                if not self._require_admin():
+                if not self._require_login():
                     return
                 self._handle_order()
             elif path == "/api/orders/progress":
-                if not self._require_device_or_admin():
+                if not self._require_device_or_login():
                     return
                 CRAFTER_STATE["last_seen"] = time.time()
                 self._handle_order_progress()
             elif path == "/api/heartbeat":
-                if not self._require_device_or_admin():
+                if not self._require_device_or_login():
                     return
                 with LOCK:
                     CRAFTER_STATE["last_seen"] = time.time()
                 self._json(200, {"ok": True})
             elif path == "/api/balance":
-                if not self._require_admin():
+                if not self._require_login():
                     return
                 with LOCK:
                     BALANCE_STATE["status"] = "requested"
@@ -1227,7 +1340,7 @@ class Handler(BaseHTTPRequestHandler):
                     BALANCE_STATE["updated_at"] = time.time()
                 self._json(200, {"ok": True, "status": "requested"})
             elif path == "/api/balance/progress":
-                if not self._require_device_or_admin():
+                if not self._require_device_or_login():
                     return
                 data = self._read_json()
                 if isinstance(data, dict):
@@ -1238,11 +1351,32 @@ class Handler(BaseHTTPRequestHandler):
                         BALANCE_STATE["updated_at"] = time.time()
                 self._json(200, {"ok": True})
             elif path == "/api/custom-recipes":
-                if not self._require_admin():
+                if not self._require_login():
                     return
                 self._handle_custom_recipes_post()
-            elif path == "/api/config":
+            elif path == "/api/users":
                 if not self._require_admin():
+                    return
+                self._handle_user_add()
+            elif path == "/api/users/password":
+                self._handle_password_change()
+            elif path == "/api/bans":
+                if not self._require_admin():
+                    return
+                self._handle_ban_add()
+            elif path == "/api/sessions/kick":
+                if not self._require_admin():
+                    return
+                data = self._read_json() or {}
+                username = str(data.get("username") or "").strip()
+                removed = 0
+                for token in list(SESSIONS.keys()):
+                    if SESSIONS[token]["username"] == username:
+                        SESSIONS.pop(token, None)
+                        removed += 1
+                self._json(200, {"ok": True, "removed": removed})
+            elif path == "/api/config":
+                if not self._require_login():
                     return
                 data = self._read_json()
                 if not isinstance(data, dict):
@@ -1280,9 +1414,9 @@ class Handler(BaseHTTPRequestHandler):
         path = parsed.path
         qs = parse_qs(parsed.query)
         try:
-            if not self._require_admin():
-                return
             if path == "/api/order":
+                if not self._require_login():
+                    return
                 oid = (qs.get("id") or [""])[0]
                 try:
                     oid = int(oid)
@@ -1293,11 +1427,45 @@ class Handler(BaseHTTPRequestHandler):
                     save_orders()
                 self._json(200, {"ok": True})
             elif path == "/api/custom-recipes":
+                if not self._require_login():
+                    return
                 rid = (qs.get("id") or [""])[0]
                 with LOCK:
                     CUSTOM_RECIPES[:] = [c for c in CUSTOM_RECIPES if c.get("id") != rid]
                     save_custom_recipes()
                     rebuild_custom_recipe_index()
+                self._json(200, {"ok": True})
+            elif path == "/api/users":
+                if not self._require_admin():
+                    return
+                name = (qs.get("id") or [""])[0].strip()
+                me = self._session_user()
+                if not name:
+                    self._json(400, {"error": "need id"})
+                    return
+                if name == me:
+                    self._json(400, {"error": "нельзя удалить самого себя"})
+                    return
+                if name not in USERS["users"]:
+                    self._json(404, {"error": "пользователь не найден"})
+                    return
+                admins = [u for u, v in USERS["users"].items()
+                          if v.get("role") == "admin" and u != name]
+                if USERS["users"][name].get("role") == "admin" and not admins:
+                    self._json(400, {"error": "нельзя удалить последнего админа"})
+                    return
+                del USERS["users"][name]
+                for token in list(SESSIONS.keys()):
+                    if SESSIONS[token]["username"] == name:
+                        SESSIONS.pop(token, None)
+                save_users()
+                self._json(200, {"ok": True})
+            elif path == "/api/bans":
+                if not self._require_admin():
+                    return
+                ip = (qs.get("id") or [""])[0].strip()
+                USERS.setdefault("bans", {}).pop(ip, None)
+                save_users()
                 self._json(200, {"ok": True})
             else:
                 self._json(404, {"error": "not found"})
@@ -1305,6 +1473,89 @@ class Handler(BaseHTTPRequestHandler):
             pass
         except Exception as e:
             self._json(500, {"error": str(e)})
+
+    # ---- auth / users / bans handlers ----
+    def _handle_login(self):
+        if self._is_banned():
+            self._json(403, {"error": "banned"})
+            return
+        data = self._read_json() or {}
+        username = str(data.get("username") or "").strip()
+        password = str(data.get("password") or "")
+        u = USERS["users"].get(username)
+        if not u or u.get("hash") != hash_password(password, u.get("salt", "")):
+            self._json(401, {"error": "Неверный логин или пароль"})
+            return
+        token = secrets.token_hex(24)
+        SESSIONS[token] = {"username": username, "ip": self._client_ip(),
+                           "created": time.time()}
+        self._send(200, json.dumps({"ok": True, "user": {"username": username,
+                                                         "role": u.get("role", "user")}}),
+                   extra={"Set-Cookie": "session=%s; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800" % token})
+
+    def _handle_user_add(self):
+        data = self._read_json() or {}
+        username = str(data.get("username") or "").strip()
+        password = str(data.get("password") or "")
+        role = data.get("role", "user")
+        if role not in ("admin", "user"):
+            role = "user"
+        if not username or not password:
+            self._json(400, {"error": "нужны username и password"})
+            return
+        if username in USERS["users"]:
+            self._json(409, {"error": "пользователь уже существует"})
+            return
+        salt = secrets.token_hex(16)
+        USERS["users"][username] = {"salt": salt,
+                                    "hash": hash_password(password, salt),
+                                    "role": role}
+        save_users()
+        self._json(200, {"ok": True, "user": {"username": username, "role": role}})
+
+    def _handle_password_change(self):
+        if self._is_banned():
+            self._json(403, {"error": "banned"})
+            return
+        me = self._session_user()
+        if not me:
+            self._json(401, {"error": "unauthorized"})
+            return
+        data = self._read_json() or {}
+        target = str(data.get("username") or "").strip() or me
+        new_password = str(data.get("password") or "")
+        is_admin = USERS["users"][me].get("role") == "admin"
+        if target != me and not is_admin:
+            self._json(403, {"error": "admin only"})
+            return
+        if not new_password:
+            self._json(400, {"error": "нужен password"})
+            return
+        if target not in USERS["users"]:
+            self._json(404, {"error": "пользователь не найден"})
+            return
+        salt = secrets.token_hex(16)
+        USERS["users"][target]["salt"] = salt
+        USERS["users"][target]["hash"] = hash_password(new_password, salt)
+        if target != me:
+            for token in list(SESSIONS.keys()):
+                if SESSIONS[token]["username"] == target:
+                    SESSIONS.pop(token, None)
+        save_users()
+        self._json(200, {"ok": True})
+
+    def _handle_ban_add(self):
+        data = self._read_json() or {}
+        ip = str(data.get("ip") or "").strip()
+        if not ip:
+            self._json(400, {"error": "нужен ip"})
+            return
+        USERS.setdefault("bans", {})[ip] = {"at": time.time()}
+        for token in list(SESSIONS.keys()):
+            if SESSIONS[token]["ip"] == ip:
+                SESSIONS.pop(token, None)
+        save_users()
+        self._json(200, {"ok": True, "ip": ip})
 
     def _handle_custom_recipes_post(self):
         data = self._read_json()
@@ -1516,7 +1767,8 @@ def main():
     load_state()
     load_orders()
     heal_orders()
-    log("Access control: %s" % ("ON" if ADMIN_PASSWORD else "OFF (site is open)"))
+    load_users()
+    log("Users: %d (session auth)" % len(USERS["users"]))
     log("GitHub sync: %s" % ("ON (%s @ %s)" % (GITHUB_REPO, GITHUB_BRANCH)
                               if GITHUB_TOKEN and GITHUB_REPO else "OFF"))
     threading.Thread(target=auto_maintain_loop, daemon=True).start()
