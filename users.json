@@ -4,6 +4,11 @@
       "salt": "bb3788bf4ee9863dd31c3836d21c04c5",
       "hash": "8c43fd5878c37b645ca16c74285ea3741581ac0a7fdbdbe6babf2b79c6696829",
       "role": "admin"
+    },
+    "anko": {
+      "salt": "7618e8a552468fe28909f75e198e6c13",
+      "hash": "a8c82b5c406765c22f3619634bfa9815b264504d3370762d09cb13be8c6a00c8",
+      "role": "user"
     }
   },
   "bans": {}
