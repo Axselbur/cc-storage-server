@@ -536,8 +536,16 @@ local function craft_step_mechanism(step)
 
     local remaining = batches
     while remaining > 0 do
-        -- порция, которая влезает в 16 слотов черепашки (стаки по 64)
+        -- размер порции: не больше СТАКА (64) на ингредиент на 1 крафт
+        -- (на депо больше стака положить нельзя), и чтобы влезало
+        -- в 16 слотов черепашки
         local runs = remaining
+        local minPerBatch = nil
+        for _, ing in ipairs(step.ingredients) do
+            local per = ing.count / batches
+            if not minPerBatch or per < minPerBatch then minPerBatch = per end
+        end
+        runs = math.min(runs, math.floor(64 / math.max(1, minPerBatch)))
         while runs > 1 do
             local slots = 0
             for _, ing in ipairs(step.ingredients) do
@@ -546,6 +554,7 @@ local function craft_step_mechanism(step)
             if slots <= 16 then break end
             runs = math.floor(runs / 2)
         end
+        if runs < 1 then runs = 1 end
 
         if not empty_turtle(nil) then
             error("turtle not empty (vaults full?)")
@@ -579,39 +588,12 @@ local function craft_step_mechanism(step)
         end
         empty_turtle(nil)
 
-        -- ждать, пока машина переработает ВСЁ, что приняла:
-        -- наши ингредиенты должны исчезнуть из входа
-        local lastLeft = nil
-        local stable = 0
-        local lastBeat = 0
-        while true do
-            local left = 0
-            local ok, list = pcall(input.list)
-            if ok and type(list) == "table" then
-                for _, info in pairs(list) do
-                    if type(info) == "table" and idset[info.name] and (info.count or 0) > 0 then
-                        left = left + info.count
-                    end
-                end
-            end
-            if left == 0 then break end
-            if left == lastLeft then
-                stable = stable + 1
-                if stable >= 5 then break end
-            else
-                lastLeft = left
-                stable = 0
-            end
-            local now = os.epoch("utc")
-            if now - lastBeat > 30000 then
-                heartbeat()
-                lastBeat = now
-                print("machine processing: " .. tostring(left) .. " items left")
-            end
-            os.sleep(2)
-        end
+        -- ЖДЁМ ПО КОЛИЧЕСТВУ, а не по времени: положили fed крафтов --
+        -- значит ждём ровно per_craft*fed результата, и пока его не будет,
+        -- НИЧЕГО не забираем. (wait_for_output ждёт бесконечно.)
+        wait_for_output(output, result, per_craft * fed)
 
-        -- остатки, которые машина так и не взяла: вернуть в вольты
+        -- только теперь: вернуть ингредиенты, которые станок не потребил
         local okL, listL = pcall(input.list)
         if okL and type(listL) == "table" then
             for slot, info in pairs(listL) do
@@ -625,9 +607,6 @@ local function craft_step_mechanism(step)
                 end
             end
         end
-
-        -- теперь дождаться полного количества результата
-        wait_for_output(output, result, per_craft * fed)
 
         drain_to_vaults(output, step.destination, outName)
         remaining = remaining - fed
