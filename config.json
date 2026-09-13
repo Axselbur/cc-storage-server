@@ -16,49 +16,49 @@
   "vault_capacity": 103680,
   "boilers": [
     {
-      "name": "createpropulsion:solid_block_entity_0",
+      "name": "createpropulsion:solid_burner_block_entity_0",
       "fuel": "coal_block",
       "item": "minecraft:coal_block",
       "interval": 5
     },
     {
-      "name": "createpropulsion:solid_block_entity_1",
+      "name": "createpropulsion:solid_burner_block_entity_1",
       "fuel": "coal_block",
       "item": "minecraft:coal_block",
       "interval": 5
     },
     {
-      "name": "createpropulsion:solid_block_entity_2",
+      "name": "createpropulsion:solid_burner_block_entity_2",
       "fuel": "coal_block",
       "item": "minecraft:coal_block",
       "interval": 5
     },
     {
-      "name": "createpropulsion:solid_block_entity_3",
+      "name": "createpropulsion:solid_burner_block_entity_3",
       "fuel": "coal_block",
       "item": "minecraft:coal_block",
       "interval": 5
     },
     {
-      "name": "createpropulsion:solid_block_entity_4",
+      "name": "createpropulsion:solid_burner_block_entity_4",
       "fuel": "coal_block",
       "item": "minecraft:coal_block",
       "interval": 5
     },
     {
-      "name": "createpropulsion:solid_block_entity_5",
+      "name": "createpropulsion:solid_burner_block_entity_5",
       "fuel": "coal_block",
       "item": "minecraft:coal_block",
       "interval": 5
     },
     {
-      "name": "createpropulsion:solid_block_entity_6",
+      "name": "createpropulsion:solid_burner_block_entity_6",
       "fuel": "coal_block",
       "item": "minecraft:coal_block",
       "interval": 5
     },
     {
-      "name": "createpropulsion:solid_block_entity_7",
+      "name": "createpropulsion:solid_burner_block_entity_7",
       "fuel": "coal_block",
       "item": "minecraft:coal_block",
       "interval": 5
