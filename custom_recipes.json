@@ -82,5 +82,20 @@
     "destination": null,
     "mechanism_input": "",
     "mechanism_output": ""
+  },
+  {
+    "id": "custom:1789310908764",
+    "output": "minecraft:bread",
+    "output_count": 1,
+    "method": "table",
+    "ingredients": [
+      {
+        "item": "minecraft:wheat",
+        "count": 3
+      }
+    ],
+    "auto_enabled": true,
+    "auto_target": 64,
+    "destination": "create_connected:item_silo_102"
   }
 ]
