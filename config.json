@@ -1,21 +1,11 @@
 {
   "vaults": [
-    "create_connected:item_silo_75",
-    "create_connected:item_silo_76",
-    "create_connected:item_silo_77",
-    "create_connected:item_silo_78",
-    "create_connected:item_silo_79",
-    "create_connected:item_silo_80",
-    "create_connected:item_silo_81",
-    "create_connected:item_silo_82",
-    "create_connected:item_silo_83",
-    "create_connected:item_silo_84",
-    "create_connected:item_silo_85",
-    "create_connected:item_silo_86",
-    "create_connected:item_silo_87",
-    "create_connected:item_silo_88",
-    "create_connected:item_silo_89",
-    "create_connected:item_silo_90"
+    "create_connected:item_silo_102",
+    "create_connected:item_silo_103",
+    "create_connected:item_silo_104",
+    "create_connected:item_silo_105",
+    "create_connected:item_silo_106",
+    "create_connected:item_silo_107"
   ],
   "turtle_name": "",
   "packagers": [],
