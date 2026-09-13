@@ -42,6 +42,15 @@ CONFIG_DEFAULTS = {
     "auto_balance": True,    # keep vaults evenly filled automatically
     "auto_balance_interval": 600,  # seconds between auto-balance runs
     "vault_capacity": 4096,  # assumed items per vault (for the monitor fill bars)
+    "boilers": [],           # steam boilers: [{"name", "fuel", "item"?, "interval"?}]
+}
+
+# топливо для котлов: burn = сколько секунд горит 1 штука (запасной таймер,
+# если котёл нельзя прочитать как инвентарь; обычно работает проверка слота)
+FUELS = {
+    "coal": {"item": "minecraft:coal", "burn": 80},
+    "coal_block": {"item": "minecraft:coal_block", "burn": 800},
+    "biomass": {"item": "create:biomass_pellet", "burn": 120},
 }
 
 LOCK = threading.RLock()
@@ -1388,7 +1397,27 @@ class Handler(BaseHTTPRequestHandler):
                             continue
                         v = data[k]
                         default = CONFIG_DEFAULTS[k]
-                        if isinstance(default, list):
+                        if k == "boilers":
+                            out = []
+                            if isinstance(v, list):
+                                for b in v:
+                                    if not isinstance(b, dict):
+                                        continue
+                                    name = str(b.get("name") or "").strip()
+                                    if not name:
+                                        continue
+                                    fuel = str(b.get("fuel") or "coal")
+                                    if fuel not in FUELS:
+                                        fuel = "coal"
+                                    item = str(b.get("item") or "").strip()
+                                    try:
+                                        interval = max(5, int(b.get("interval") or 0))
+                                    except (TypeError, ValueError):
+                                        interval = 0
+                                    out.append({"name": name, "fuel": fuel,
+                                                "item": item, "interval": interval})
+                            CONFIG[k] = out
+                        elif isinstance(default, list):
                             CONFIG[k] = [str(x).strip() for x in v
                                          if str(x).strip()] if isinstance(v, list) else []
                         elif isinstance(default, bool):
