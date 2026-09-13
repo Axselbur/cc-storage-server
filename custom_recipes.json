@@ -130,7 +130,7 @@
         "count": 2
       }
     ],
-    "auto_enabled": true,
-    "auto_target": 64
+    "auto_enabled": false,
+    "auto_target": 0
   }
 ]
