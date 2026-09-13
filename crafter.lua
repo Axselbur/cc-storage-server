@@ -506,6 +506,17 @@ local function wait_for_output(output, result, target)
     end
 end
 
+local function count_item(id)
+    local total = 0
+    for s = 1, 16 do
+        local d = turtle.getItemDetail(s)
+        if d and d.name == id then
+            total = total + d.count
+        end
+    end
+    return total
+end
+
 local function craft_step_mechanism(step)
     local inName = resolve_name(step.mechanism_input) or step.mechanism_input
     local outName = resolve_name(step.mechanism_output) or step.mechanism_output
@@ -519,6 +530,9 @@ local function craft_step_mechanism(step)
 
     -- чужой результат в выходе не считаем
     drain_to_vaults(output, step.destination, outName)
+
+    local idset = {}
+    for _, ing in ipairs(step.ingredients) do idset[ing.id] = true end
 
     local remaining = batches
     while remaining > 0 do
@@ -537,34 +551,82 @@ local function craft_step_mechanism(step)
             error("turtle not empty (vaults full?)")
         end
 
-        -- набрать ингредиенты из любых вольтов
-        local total = 0
+        -- набрать ингредиенты
+        local pulled = {}
         for _, ing in ipairs(step.ingredients) do
-            local need = ing.count * runs
+            local need = math.ceil(ing.count * runs)
             local have = 0
             for slot = 1, 16 do
                 if have >= need then break end
                 local cur = pull_into_slot(ing.id, slot, need - have)
                 if cur and cur > 0 then have = have + cur end
             end
-            total = total + have
-            if have < need then
-                runs = math.min(runs, math.floor(have / ing.count))
-            end
+            pulled[ing.id] = have
         end
-        if runs < 1 then error("not enough in storage") end
 
-        -- скормить машине и проверить, что она приняла
-        local before = inventory_total(input)
+        -- скормить машине
         push_all_turtle_to(inName)
-        local accepted = inventory_total(input) - before
-        local per_batch = 0
-        for _, ing in ipairs(step.ingredients) do per_batch = per_batch + ing.count end
-        local fed = math.floor(accepted / per_batch)
-        if fed < 1 then error("input won't accept") end
+
+        -- сколько машина реально приняла (что осталось в черепашке -- не приняла)
+        local fed = runs
+        for _, ing in ipairs(step.ingredients) do
+            local taken = pulled[ing.id] - count_item(ing.id)
+            fed = math.min(fed, math.floor(taken / ing.count))
+        end
+        if fed < 1 then
+            empty_turtle(nil)
+            error("input won't accept")
+        end
         empty_turtle(nil)
 
-        -- ждать результат (бесконечно, с heartbeat)
+        -- ждать, пока машина переработает ВСЁ, что приняла:
+        -- наши ингредиенты должны исчезнуть из входа
+        local lastLeft = nil
+        local stable = 0
+        local lastBeat = 0
+        while true do
+            local left = 0
+            local ok, list = pcall(input.list)
+            if ok and type(list) == "table" then
+                for _, info in pairs(list) do
+                    if type(info) == "table" and idset[info.name] and (info.count or 0) > 0 then
+                        left = left + info.count
+                    end
+                end
+            end
+            if left == 0 then break end
+            if left == lastLeft then
+                stable = stable + 1
+                if stable >= 5 then break end
+            else
+                lastLeft = left
+                stable = 0
+            end
+            local now = os.epoch("utc")
+            if now - lastBeat > 30000 then
+                heartbeat()
+                lastBeat = now
+                print("machine processing: " .. tostring(left) .. " items left")
+            end
+            os.sleep(2)
+        end
+
+        -- остатки, которые машина так и не взяла: вернуть в вольты
+        local okL, listL = pcall(input.list)
+        if okL and type(listL) == "table" then
+            for slot, info in pairs(listL) do
+                if type(info) == "table" and idset[info.name] and (info.count or 0) > 0 then
+                    local rest = info.count
+                    for _, vname in ipairs(activeVaults) do
+                        if rest <= 0 then break end
+                        local okp, m = pcall(input.pushItems, resolve_name(vname) or vname, slot, rest)
+                        if okp and m and m > 0 then rest = rest - m end
+                    end
+                end
+            end
+        end
+
+        -- теперь дождаться полного количества результата
         wait_for_output(output, result, per_craft * fed)
 
         drain_to_vaults(output, step.destination, outName)
@@ -575,17 +637,6 @@ local function craft_step_mechanism(step)
 end
 
 -- ======================= ИСПОЛНЕНИЕ ЗАКАЗА =======================
-local function count_item(id)
-    local total = 0
-    for s = 1, 16 do
-        local d = turtle.getItemDetail(s)
-        if d and d.name == id then
-            total = total + d.count
-        end
-    end
-    return total
-end
-
 local function step_ready(step)
     local ings = step.ingredients
     if not ings or #ings == 0 then
