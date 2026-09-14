@@ -154,11 +154,16 @@
       {
         "item": "create:large_cogwheel",
         "count": 5
+      },
+      {
+        "item": "create:large_cogwheel",
+        "count": 5
       }
     ],
     "auto_enabled": true,
     "auto_target": 128,
     "mechanism_input": "create:item_vault_13",
-    "mechanism_output": "minecraft:chest_8"
+    "mechanism_output": "minecraft:chest_8",
+    "destination": null
   }
 ]
