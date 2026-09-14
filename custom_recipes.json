@@ -132,5 +132,33 @@
     ],
     "auto_enabled": false,
     "auto_target": 0
+  },
+  {
+    "id": "custom:1789377795464",
+    "output": "create:precision_mechanism",
+    "output_count": 1,
+    "method": "mechanism",
+    "ingredients": [
+      {
+        "item": "minecraft:gold_ingot",
+        "count": 1
+      },
+      {
+        "item": "minecraft:iron_nugget",
+        "count": 5
+      },
+      {
+        "item": "create:cogwheel",
+        "count": 5
+      },
+      {
+        "item": "create:large_cogwheel",
+        "count": 5
+      }
+    ],
+    "auto_enabled": true,
+    "auto_target": 128,
+    "mechanism_input": "create:item_vault_13",
+    "mechanism_output": "minecraft:chest_8"
   }
 ]
