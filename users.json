@@ -9,6 +9,11 @@
       "salt": "7618e8a552468fe28909f75e198e6c13",
       "hash": "a8c82b5c406765c22f3619634bfa9815b264504d3370762d09cb13be8c6a00c8",
       "role": "user"
+    },
+    "dywka008": {
+      "salt": "430a3d2238a9e92e95b937d782befafe",
+      "hash": "ac652d7202da831458a99d50657ecd1e1f5246f9c619920969b911c6032a3c8b",
+      "role": "user"
     }
   },
   "bans": {}
