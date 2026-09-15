@@ -264,7 +264,7 @@
         "count": 1
       }
     ],
-    "auto_enabled": false,
+    "auto_enabled": true,
     "auto_target": 128,
     "destination": "create_connected:item_silo_102",
     "mechanism_input": "create:depot_9",
