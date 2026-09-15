@@ -217,16 +217,18 @@
     "method": "table",
     "ingredients": [
       {
-        "item": "create:iron_sheet",
+        "item": "create:polished_rose_quartz",
         "count": 1
       },
       {
-        "item": "create:polished_rose_quartz",
+        "item": "create:iron_sheet",
         "count": 1
       }
     ],
     "auto_enabled": true,
     "auto_target": 64,
-    "destination": "create_connected:item_silo_102"
+    "destination": "create_connected:item_silo_102",
+    "mechanism_input": "",
+    "mechanism_output": ""
   }
 ]
