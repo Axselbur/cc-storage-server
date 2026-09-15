@@ -503,17 +503,6 @@ local function craft_step_mechanism(step)
     local output = peripheral.wrap(outName)
     if not input or not output then error("mechanism not found") end
 
-    -- защита от неверной настройки: вход/выход не должны указывать на вольт
-    for _, v in ipairs(cfg_vaults()) do
-        local rv = resolve_name(v)
-        if rv and rv == inName then
-            error("mechanism_input указывает на вольт: " .. tostring(inName))
-        end
-        if rv and rv == outName then
-            error("mechanism_output указывает на вольт: " .. tostring(outName))
-        end
-    end
-
     local result = step.result
     local per_craft = (step.count or 0) / (step.batches or 1)
     local batches = step.batches or 1
