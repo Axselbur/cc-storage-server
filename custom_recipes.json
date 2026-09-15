@@ -286,5 +286,21 @@
     "destination": "create_connected:item_silo_102",
     "mechanism_input": "minecraft:hopper_1",
     "mechanism_output": "minecraft:barrel_4"
+  },
+  {
+    "id": "custom:1789491306864",
+    "output": "create_netherless:coal_rod",
+    "output_count": 1,
+    "method": "mechanism",
+    "ingredients": [
+      {
+        "item": "minecraft:coal_block",
+        "count": 1
+      }
+    ],
+    "auto_enabled": true,
+    "auto_target": 192,
+    "mechanism_input": "create:depot_10",
+    "mechanism_output": "create:depot_10"
   }
 ]
