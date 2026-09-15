@@ -138,6 +138,6 @@
     "auto_target": 64,
     "destination": "create_connected:item_silo_102",
     "mechanism_input": "create:item_vault_13",
-    "mechanism_output": "create:depot_9"
+    "mechanism_output": "minecraft:chest_8"
   }
 ]
