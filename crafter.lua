@@ -105,34 +105,12 @@ local function fetch_server_config()
 end
 
 -- ======================= ПЕРИФЕРИЯ =======================
--- Принимаем любые варианты имён вольтов/силосов:
--- create:item_vault_1, create_connected:item_silo_75 и т.п.
-local function is_vault_name(n)
-    local norm = string.lower(string.gsub(n, "[:%s_%-]", ""))
-    if string.match(norm, "(%d+)$") == nil then
-        return false
-    end
-    return string.match(norm, "itemvault") ~= nil
-        or string.match(norm, "itemsilo") ~= nil
-end
-
-local function discover_vaults()
-    local out = {}
-    for _, n in ipairs(peripheral.getNames()) do
-        if is_vault_name(n) then
-            table.insert(out, n)
-        end
-    end
-    table.sort(out)
-    return out
-end
-
+-- Черепашка работает ТОЛЬКО с вольтами из конфига сайта: чужие
+-- хранилища (буфер станка и т.п.) не трогаем.
 local function cfg_vaults()
     local v = SERVER_CONFIG.vaults
     if type(v) == "table" and #v > 0 then return v end
-    v = CONFIG.fallback_storage or {}
-    if #v > 0 then return v end
-    return discover_vaults()
+    return CONFIG.fallback_storage or {}
 end
 
 local function normalize_name(s)

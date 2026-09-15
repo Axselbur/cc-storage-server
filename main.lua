@@ -242,7 +242,7 @@ local function logistics_pass(active_vaults)
             for slot, item in pairs(list) do
                 local count = item.count
                 if count > 0 then
-                    for _, vname in ipairs(active_vaults) do
+                    for _, vname in ipairs(cfg_vaults()) do
                         local vN = resolve_name(vname) or vname
                         local okp, m = pcall(buf.pushItems, vN, slot, count)
                         if okp and m and m > 0 then
@@ -338,6 +338,8 @@ end
 -- Один list() на вольт -> модель {total, slots}. Перекладываем самый
 -- большой стак, который влезает в разницу, из самого полного в самый
 -- пустой. Делить стаки нельзя; лимит 400 стаков за запуск.
+-- ВАЖНО: балансируем ТОЛЬКО вольты из конфига сайта -- чужие хранилища
+-- (например, буфер станка) не трогаем.
 local active_vaults = {}
 
 local function balance_vaults()
@@ -357,7 +359,7 @@ local function balance_vaults()
         return { name = name, total = total, slots = slots }
     end
 
-    for _, name in ipairs(active_vaults) do
+    for _, name in ipairs(cfg_vaults()) do
         local m = scan_into(name)
         if m then table.insert(model, m) end
     end
@@ -500,19 +502,16 @@ local function main()
                     end
                 end
 
-                -- собрать список вольтов: конфиг + авто-обнаружение
+                -- собрать список вольтов: ТОЛЬКО конфиг сайта.
+                -- авто-обнаружение -- лишь запасной вариант, когда
+                -- на сайте ничего не настроено (чужие хранилища,
+                -- например буфер станка, не трогаем).
                 local names = {}
                 for _, n in ipairs(cfg_vaults()) do
                     table.insert(names, n)
                 end
-                if CONFIG.auto_discover_fallback then
-                    for _, n in ipairs(discover_vaults()) do
-                        local found = false
-                        for _, c in ipairs(names) do
-                            if c == n then found = true break end
-                        end
-                        if not found then table.insert(names, n) end
-                    end
+                if #names == 0 and CONFIG.auto_discover_fallback then
+                    names = discover_vaults()
                 end
 
                 -- сканирование
