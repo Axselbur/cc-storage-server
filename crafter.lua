@@ -204,9 +204,18 @@ local function vault_slot_with(vault, id)
     return nil
 end
 
+-- сколько предметов id лежит в слоте toSlot; если там ДРУГОЙ предмет -- 0
+local function slot_has(id, toSlot)
+    local d = turtle.getItemDetail(toSlot)
+    if d and d.name == id then
+        return d.count
+    end
+    return 0
+end
+
 -- Набрать want предметов id в слот toSlot черепашки из любых вольтов.
 local function pull_into_slot(id, toSlot, want)
-    local cur = turtle.getItemCount(toSlot)
+    local cur = slot_has(id, toSlot)
     local attempts = 0
     while cur < want and attempts < 8 do
         attempts = attempts + 1
@@ -219,7 +228,7 @@ local function pull_into_slot(id, toSlot, want)
                 if slot then
                     local ok, m = pcall(vault.pushItems, turtleName, slot, want - cur, toSlot)
                     if ok and m and m > 0 then
-                        cur = turtle.getItemCount(toSlot)
+                        cur = slot_has(id, toSlot)
                         advanced = true
                     end
                 end
@@ -540,16 +549,22 @@ local function craft_step_mechanism(step)
         end
 
         -- набрать ингредиенты: ing.count -- ВСЕГО за шаг, поэтому на
-        -- порцию нужно (ing.count / batches) * runs штук
+        -- порцию нужно (ing.count / batches) * runs штук.
+        -- КАЖДЫЙ ингредиент кладём в СВОИ слоты (подряд, не переиспользуя
+        -- слоты с другими предметами).
         local pulled = {}
+        local nextSlot = 1
         for _, ing in ipairs(step.ingredients) do
             local per = ing.count / batches
             local need = math.ceil(per * runs)
             local have = 0
-            for slot = 1, 16 do
-                if have >= need then break end
-                local cur = pull_into_slot(ing.id, slot, need - have)
-                if cur and cur > 0 then have = have + cur end
+            while have < need and nextSlot <= 16 do
+                local cur = pull_into_slot(ing.id, nextSlot, need - have)
+                if cur <= 0 then
+                    error("not enough in storage: " .. tostring(ing.id))
+                end
+                have = have + cur
+                nextSlot = nextSlot + 1
             end
             pulled[ing.id] = have
         end
