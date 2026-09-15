@@ -143,5 +143,19 @@
     "destination": "create_connected:item_silo_102",
     "mechanism_input": "create:item_vault_13",
     "mechanism_output": "minecraft:chest_8"
+  },
+  {
+    "id": "custom:1789457415959",
+    "output": "minecraft:gold_ingot",
+    "output_count": 9,
+    "method": "table",
+    "ingredients": [
+      {
+        "item": "minecraft:gold_block",
+        "count": 1
+      }
+    ],
+    "auto_enabled": true,
+    "auto_target": 128
   }
 ]
