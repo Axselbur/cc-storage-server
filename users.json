@@ -15,6 +15,11 @@
       "hash": "ac652d7202da831458a99d50657ecd1e1f5246f9c619920969b911c6032a3c8b",
       "role": "user",
       "last_ip": "88.147.152.195"
+    },
+    "Enly": {
+      "salt": "0488d8f8a89f6af4148a2a826fcc4b5b",
+      "hash": "95f1bb4c3661633390b99b861aa915f2dbd2b8d003f033cdbe10f48c0027e953",
+      "role": "user"
     }
   },
   "bans": {}
