@@ -2,19 +2,18 @@
   ================================================================
   CC Storage Server -- crafter.lua (черепашка с верстаком)
   ================================================================
-  Забирает заказы на крафт с сервера и выполняет их:
+  Крафтит СТРОГО по плану с сервера:
 
-    * рецепты верстака (turtle.craft) прогонами по вместимости:
-      сетка крафта = слоты 1,2,3 / 5,6,7 / 9,10,11, остальные слоты
-      обязаны быть пустыми;
-    * рецепты механизмов (пользовательские): ингредиенты в механизм
-      по сети, ожидание результата в выходном инвентаре.
+    * верстак: рецепты из дампа/пользовательские -- сетка 3x3 в
+      слотах 1,2,3 / 5,6,7 / 9,10,11 (CC:Tweaked), ингредиенты
+      кладутся точно по позициям рецепта;
+    * станки (mechanism): ингредиенты кладутся во вход по сети,
+      результат ждём в выходе ПО КОЛИЧЕСТВУ (положил N -- ждём N).
 
   ТРЕБОВАНИЯ:
-    - черепашка стоит рядом с верстаком И подключена к вольтам
-      проводной сетью (wired modem) -- без него pushItems не работает;
-    - http включён в CC-конфиге;
-    - адрес сервера ПУБЛИЧНЫЙ (https://...onrender.com).
+    - черепашка рядом с верстаком;
+    - wired-модем (та же проводная сеть, что у вольтов и станков);
+    - http включён в CC-конфиге.
 
   УСТАНОВКА:
     wget https://<app>.onrender.com/crafter.lua startup ; reboot
@@ -32,13 +31,6 @@ local CONFIG = {
 
     use_monitor = true,
     monitor_text_scale = 0.5,
-
-    -- Раскладка сетки крафта в инвентаре черепашки:
-    -- "corner" -- угол 4x4-инвентаря: 1,2,3 / 5,6,7 / 9,10,11
-    -- "linear" -- слоты 1-9 подряд (старые версии CC)
-    -- Это лишь порядок попытки: если крафт не прошёл, черепашка сама
-    -- переложит предметы в другую раскладку и попробует снова.
-    grid_mode = "corner",
 }
 -- ========================================================
 
@@ -89,30 +81,29 @@ local function api_post(path, payload)
 end
 
 local function heartbeat()
-    return api_post("/api/heartbeat", { computer = os.computerID() })
+    api_post("/api/heartbeat", { computer = os.computerID() })
 end
 
 -- ======================= КОНФИГ С СЕРВЕРА =======================
 local SERVER_CONFIG = {}
 
 local function fetch_server_config()
-    local cfg = api_get("/api/config")
-    if type(cfg) == "table" then
-        SERVER_CONFIG = cfg
+    local data = api_get("/api/config")
+    if data and type(data) == "table" then
+        SERVER_CONFIG = data
         return true
     end
     return false
 end
 
--- ======================= ПЕРИФЕРИЯ =======================
--- Черепашка работает ТОЛЬКО с вольтами из конфига сайта: чужие
--- хранилища (буфер станка и т.п.) не трогаем.
+-- Черепашка работает ТОЛЬКО с вольтами из конфига сайта.
 local function cfg_vaults()
     local v = SERVER_CONFIG.vaults
     if type(v) == "table" and #v > 0 then return v end
     return CONFIG.fallback_storage or {}
 end
 
+-- ======================= ПЕРИФЕРИЯ =======================
 local function normalize_name(s)
     return string.lower(string.gsub(s, "[:%s_%-]", ""))
 end
@@ -135,56 +126,69 @@ local function resolve_name(want)
     return nil
 end
 
-local function get_inventory(name)
-    local n = resolve_name(name)
-    if not n then return nil end
-    local inv = peripheral.wrap(n)
-    if inv and inv.list then return inv end
+local function wrap_storage(name)
+    if not name or name == "" then
+        return nil
+    end
+    local resolved = resolve_name(name) or name
+    local ok, inv = pcall(peripheral.wrap, resolved)
+    if ok and type(inv) == "table" and inv.list and inv.pushItems and inv.pullItems then
+        return inv
+    end
     return nil
 end
 
 local function scan_vault(inv)
     local out = {}
     local ok, list = pcall(inv.list)
-    if not ok then return nil end
+    if not ok or type(list) ~= "table" then return nil end
     for _, item in pairs(list) do
-        out[item.name] = (out[item.name] or 0) + item.count
+        if type(item) == "table" and item.name then
+            out[item.name] = (out[item.name] or 0) + (item.count or 0)
+        end
     end
     return out
 end
 
--- Имя черепашки в проводной сети (нужно, чтобы вольты могли pushItems
--- прямо в её слоты). Табличка с label НЕ меняет сетевое имя.
-local function get_turtle_network_name()
+-- ======================= ИМЯ ЧЕРЕПАШКИ В СЕТИ =======================
+local detected_turtle_name = nil
+
+local function current_turtle_name()
+    if detected_turtle_name then
+        return detected_turtle_name
+    end
     for _, n in ipairs(peripheral.getNames()) do
         if peripheral.getType(n) == "modem" then
             local m = peripheral.wrap(n)
-            local isW = nil
+            local isW = true
             pcall(function() isW = m.isWireless() end)
             if isW == false or isW == nil then
                 local ok, name = pcall(m.getNameLocal)
-                if ok and name then return name end
+                if ok and type(name) == "string" and name ~= "" then
+                    detected_turtle_name = name
+                    return name
+                end
             end
         end
     end
-    return nil
+    if SERVER_CONFIG.turtle_name and SERVER_CONFIG.turtle_name ~= "" then
+        return SERVER_CONFIG.turtle_name
+    end
+    return CONFIG.fallback_turtle_name
 end
 
 -- ======================= СОСТОЯНИЕ =======================
-local activeVaults = {}
-local stock = {}
-local turtleName = nil
+local activeVaults = {}   -- вольты, среди которых ищем/кладём
+local stock = {}          -- снимок содержимого
 local configOk = false
 
 local function scan_all_vaults()
-    activeVaults = {}
     stock = {}
-    for _, name in ipairs(cfg_vaults()) do
-        local inv = get_inventory(name)
+    for _, name in ipairs(activeVaults) do
+        local inv = wrap_storage(name)
         if inv then
             local data = scan_vault(inv)
             if data then
-                table.insert(activeVaults, name)
                 for id, cnt in pairs(data) do
                     stock[id] = (stock[id] or 0) + cnt
                 end
@@ -194,306 +198,7 @@ local function scan_all_vaults()
     return #activeVaults
 end
 
--- ======================= ПЕРЕКЛАДКА ПРЕДМЕТОВ =======================
-local function vault_slot_with(vault, id)
-    local ok, list = pcall(vault.list)
-    if not ok then return nil end
-    for slot, item in pairs(list) do
-        if item.name == id then return slot end
-    end
-    return nil
-end
-
--- сколько предметов id лежит в слоте toSlot; если там ДРУГОЙ предмет -- 0
-local function slot_has(id, toSlot)
-    local d = turtle.getItemDetail(toSlot)
-    if d and d.name == id then
-        return d.count
-    end
-    return 0
-end
-
--- Набрать want предметов id в слот toSlot черепашки из любых вольтов.
-local function pull_into_slot(id, toSlot, want)
-    local cur = slot_has(id, toSlot)
-    local attempts = 0
-    while cur < want and attempts < 8 do
-        attempts = attempts + 1
-        local advanced = false
-        for _, vname in ipairs(activeVaults) do
-            if cur >= want then break end
-            local vault = get_inventory(vname)
-            if vault then
-                local slot = vault_slot_with(vault, id)
-                if slot then
-                    local ok, m = pcall(vault.pushItems, turtleName, slot, want - cur, toSlot)
-                    if ok and m and m > 0 then
-                        cur = slot_has(id, toSlot)
-                        advanced = true
-                    end
-                end
-            end
-        end
-        if not advanced then break end
-    end
-    return cur
-end
-
-local function push_slot_out(slot, target)
-    local count = turtle.getItemCount(slot)
-    if count <= 0 then return true end
-    -- основной путь: вольт сам забирает из черепашки
-    -- (то же направление, что при выдаче ингредиентов -- оно работает)
-    local vault = get_inventory(target)
-    if vault then
-        local ok, m = pcall(vault.pullItems, turtleName, slot, count)
-        if ok and m and m > 0 then
-            count = turtle.getItemCount(slot)
-        end
-    end
-    -- запасной путь: толкаем из черепашки
-    if count > 0 then
-        local ok, m = pcall(turtle.pushItems, target, slot, count)
-        if ok and m and m > 0 then
-            count = turtle.getItemCount(slot)
-        end
-    end
-    return count <= 0
-end
-
--- Всё из черепашки -> destination (если задан) или в любой вольт.
-local function empty_turtle(destination)
-    local cleared = true
-    for slot = 1, 16 do
-        if turtle.getItemCount(slot) > 0 then
-            local moved = false
-            if destination and destination ~= "" then
-                moved = push_slot_out(slot, resolve_name(destination) or destination)
-            end
-            if not moved then
-                for _, vname in ipairs(activeVaults) do
-                    if push_slot_out(slot, resolve_name(vname) or vname) then
-                        moved = true
-                        break
-                    end
-                end
-            end
-            if not moved then cleared = false end
-        end
-    end
-    return cleared
-end
-
--- Все слоты чужого инвентаря -> destination, затем вольты по очереди.
--- Если задан onlyItem -- двигаем ТОЛЬКО этот предмет (чужие вещи не трогаем).
-local function drain_to_vaults(inv, destination, sourceName, onlyItem)
-    if not inv then return end
-    local ok, list = pcall(inv.list)
-    if not ok then return end
-    for slot, item in pairs(list) do
-        local count = item.count
-        if count > 0 and (not onlyItem or item.name == onlyItem) then
-            local targets = {}
-            if destination and destination ~= "" then
-                table.insert(targets, resolve_name(destination) or destination)
-            end
-            for _, vname in ipairs(activeVaults) do
-                local rn = resolve_name(vname) or vname
-                local dup = false
-                for _, t in ipairs(targets) do
-                    if t == rn then dup = true end
-                end
-                if not dup then table.insert(targets, rn) end
-            end
-            for _, tname in ipairs(targets) do
-                if count <= 0 then break end
-                local okp, m = pcall(inv.pushItems, tname, slot, count)
-                if okp and m and m > 0 then count = count - m end
-                -- запасной путь: вольт сам тянет из этого инвентаря
-                if count > 0 and sourceName then
-                    local vault = get_inventory(tname)
-                    if vault then
-                        local ok2, m2 = pcall(vault.pullItems, sourceName, slot, count)
-                        if ok2 and m2 and m2 > 0 then count = count - m2 end
-                    end
-                end
-            end
-        end
-    end
-end
-
-local function inventory_total(inv)
-    local ok, list = pcall(inv.list)
-    if not ok then return 0 end
-    local t = 0
-    for _, item in pairs(list) do t = t + item.count end
-    return t
-end
-
-local function count_in_inventory(inv, id)
-    local ok, list = pcall(inv.list)
-    if not ok then return 0 end
-    local t = 0
-    for _, item in pairs(list) do
-        if item.name == id then t = t + item.count end
-    end
-    return t
-end
-
-local function push_all_turtle_to(target)
-    local moved = 0
-    local input = get_inventory(target)
-    for slot = 1, 16 do
-        if turtle.getItemCount(slot) > 0 then
-            local count = turtle.getItemCount(slot)
-            local ok, m = pcall(turtle.pushItems, target, slot, count)
-            if ok and m and m > 0 then
-                moved = moved + m
-                count = turtle.getItemCount(slot)
-            end
-            -- запасной путь: приёмник сам тянет из черепашки
-            if count > 0 and input then
-                local ok2, m2 = pcall(input.pullItems, turtleName, slot, count)
-                if ok2 and m2 and m2 > 0 then moved = moved + m2 end
-            end
-        end
-    end
-    return moved
-end
-
--- ======================= КРАФТ НА ВЕРСТАКЕ =======================
--- Раскладка сетки зависит от версии CC (см. CONFIG.grid_mode), поэтому
--- крафт САМ ПОДБИРАЕТ раскладку: пробует предпочтительную, при неудаче
--- перекладывает предметы в альтернативную и пробует снова.
-local GRID_MODES = {
-    { slots = { 1, 2, 3, 5, 6, 7, 9, 10, 11 } },  -- corner (CC:Tweaked)
-    { slots = { 1, 2, 3, 4, 5, 6, 7, 8, 9 } },     -- linear (старые CC)
-}
-local gridOrder
-if CONFIG.grid_mode == "linear" then
-    gridOrder = { 2, 1 }
-else
-    gridOrder = { 1, 2 }
-end
-
-local function relocate_slots(fromSlots, toSlots)
-    for i = 1, 9 do
-        local from = fromSlots[i]
-        local to = toSlots[i]
-        if from ~= to then
-            local count = turtle.getItemCount(from)
-            if count > 0 then
-                turtle.select(from)
-                turtle.transferTo(to, count)
-            end
-        end
-    end
-end
-
-local function craft_step_table(step)
-    local remaining = step.batches or 1
-    local per_craft = (step.count or 0) / (step.batches or 1)
-
-    -- какие предметы класть в сетку (на 1 крафт).
-    -- ВАЖНО: для form-рецептов позиции пустых ячеек сохраняются!
-    local cells = {}
-    if step.shapeless then
-        for _, ing in ipairs(step.ingredients or {}) do
-            local per = ing.count / (step.batches or 1)
-            for _ = 1, per do
-                table.insert(cells, ing.id)
-            end
-        end
-    else
-        local grid = step.grid or {}
-        for i = 1, 9 do
-            cells[i] = grid[i]
-        end
-    end
-    local hasAny = false
-    for i = 1, 9 do
-        if cells[i] then hasAny = true break end
-    end
-    if not hasAny then error("empty grid") end
-
-    while remaining > 0 do
-        -- 1) черепашка пустая, иначе turtle.craft не пройдёт
-        if not empty_turtle(nil) then
-            error("turtle not empty (vaults full?)")
-        end
-
-        -- 2) сколько крафтов можно сделать за прогон
-        local want = math.min(remaining, 64)
-        want = math.min(want, math.floor(7 * 64 / per_craft))
-        if want < 1 then want = 1 end
-
-        -- 3) набрать предметы в предпочтительную раскладку сетки
-        local slotMap = {}
-        for i = 1, 9 do
-            local gid = cells[i]
-            if gid then
-                slotMap[i] = pull_into_slot(gid, GRID_MODES[gridOrder[1]].slots[i], want)
-            end
-        end
-        local runs = want
-        for _, c in pairs(slotMap) do runs = math.min(runs, c) end
-        if runs < 1 then
-            error("not enough in storage")
-        end
-
-        -- 4) крафт; если раскладка не подошла -- пробуем альтернативную
-        local crafted = false
-        for k = 1, #gridOrder do
-            if k > 1 then
-                relocate_slots(GRID_MODES[gridOrder[1]].slots, GRID_MODES[gridOrder[k]].slots)
-                print("  layout " .. tostring(gridOrder[1]) .. " failed, trying " .. tostring(gridOrder[k]))
-            end
-            turtle.select(1)
-            if turtle.craft(runs) then
-                crafted = true
-                if k > 1 then
-                    gridOrder = { gridOrder[k], gridOrder[1] }
-                    print("  grid layout switched")
-                end
-                break
-            end
-        end
-        if not crafted then
-            -- показать, что лежало в сетке, для диагностики
-            local desc = {}
-            for i = 1, 9 do
-                local gid = cells[i]
-                if gid then
-                    desc[#desc + 1] = tostring(i) .. ":" .. tostring(gid)
-                end
-            end
-            error("turtle.craft failed (cells: " .. table.concat(desc, " ") .. ")")
-        end
-
-        -- 5) результат -> вольты
-        empty_turtle(step.destination)
-        remaining = remaining - runs
-        print("craft: " .. tostring(step.result) .. " " ..
-            tostring(step.batches - remaining) .. "/" .. tostring(step.batches))
-    end
-end
-
--- ======================= КРАФТ ЧЕРЕЗ МЕХАНИЗМ =======================
-local function wait_for_output(output, result, target)
-    local lastBeat = 0
-    while true do
-        local have = count_in_inventory(output, result)
-        if have >= target then return end
-        local now = os.epoch("utc")
-        if now - lastBeat > 30000 then
-            heartbeat()
-            lastBeat = now
-            print("waiting: " .. tostring(result) .. " " .. tostring(have) .. "/" .. tostring(target))
-        end
-        os.sleep(3)
-    end
-end
-
+-- ======================= ИНВЕНТАРЬ =======================
 local function count_item(id)
     local total = 0
     for s = 1, 16 do
@@ -505,38 +210,269 @@ local function count_item(id)
     return total
 end
 
+local function pull_from_inventory(inv, id, need)
+    local ok, list = pcall(inv.list)
+    if not ok or type(list) ~= "table" then return end
+    local turtle_name = current_turtle_name()
+    for slot, info in pairs(list) do
+        if count_item(id) >= need then break end
+        if type(info) == "table" and info.name == id then
+            local take = math.min(need - count_item(id), info.count or 0)
+            if take > 0 then
+                pcall(inv.pushItems, turtle_name, slot, take)
+            end
+        end
+    end
+end
+
+local function pull_from_any_vault(id, need)
+    if count_item(id) >= need then return true end
+    for _, vault_name in ipairs(activeVaults) do
+        if count_item(id) >= need then break end
+        local inv = wrap_storage(vault_name)
+        if inv then
+            pull_from_inventory(inv, id, need)
+        end
+    end
+    return count_item(id) >= need
+end
+
+-- Набрать want предметов id ИМЕННО в слот to_slot (с проверкой предмета!)
+local function pull_into_slot(id, to_slot, want)
+    local turtle_name = current_turtle_name()
+    local function have()
+        local d = turtle.getItemDetail(to_slot)
+        return (d and d.name == id) and d.count or 0
+    end
+    local cur = have()
+    if cur >= want then return cur end
+    for _, vault_name in ipairs(activeVaults) do
+        local inv = wrap_storage(vault_name)
+        if inv then
+            local ok2, list = pcall(inv.list)
+            if ok2 and type(list) == "table" then
+                for slot, info in pairs(list) do
+                    if type(info) == "table" and info.name == id then
+                        local ok3, n = pcall(inv.pushItems, turtle_name, slot, want - cur, to_slot)
+                        n = (ok3 and tonumber(n)) or 0
+                        cur = cur + n
+                        if cur >= want then return cur end
+                        if n == 0 and cur > 0 then
+                            return cur  -- слот упёрся в лимит стака
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return cur
+end
+
+-- Вольт сам забирает всё из черепашки
+local function push_all_to_storage(storage)
+    local turtle_name = current_turtle_name()
+    for s = 1, 16 do
+        local d = turtle.getItemDetail(s)
+        if d then
+            pcall(storage.pullItems, turtle_name, s, d.count)
+        end
+    end
+end
+
+-- Всё из черепашки: destination (если задан), затем вольты по очереди
+local function deliver(destination)
+    local dest = wrap_storage(destination)
+    if dest then
+        push_all_to_storage(dest)
+    end
+    local turtle_name = current_turtle_name()
+    for _, name in ipairs(activeVaults) do
+        local inv = wrap_storage(name)
+        if inv then
+            local left = 0
+            for s = 1, 16 do
+                local d = turtle.getItemDetail(s)
+                if d then
+                    pcall(inv.pullItems, turtle_name, s, d.count)
+                    if turtle.getItemDetail(s) then left = left + 1 end
+                end
+            end
+            if left == 0 then return true end
+        end
+    end
+    return false
+end
+
+local function empty_turtle(destination)
+    deliver(destination)
+    for s = 1, 16 do
+        if turtle.getItemCount(s) > 0 then
+            return false
+        end
+    end
+    return true
+end
+
+-- Забрать из инвентаря только предметы only_item -> destination/вольты
+local function drain_only(inv, destination, only_item)
+    if not inv then return end
+    local ok, list = pcall(inv.list)
+    if not ok or type(list) ~= "table" then return end
+    local targets = {}
+    if destination and destination ~= "" then
+        table.insert(targets, resolve_name(destination) or destination)
+    end
+    for _, name in ipairs(activeVaults) do
+        local rn = resolve_name(name) or name
+        local dup = false
+        for _, t in ipairs(targets) do
+            if t == rn then dup = true end
+        end
+        if not dup then table.insert(targets, rn) end
+    end
+    for slot, info in pairs(list) do
+        if type(info) == "table" and info.name == only_item and (info.count or 0) > 0 then
+            local rest = info.count
+            for _, tname in ipairs(targets) do
+                if rest <= 0 then break end
+                local okp, m = pcall(inv.pushItems, tname, slot, rest)
+                if okp and m and m > 0 then rest = rest - m end
+            end
+        end
+    end
+end
+
+-- Ждать по количеству: пока в inv не наберётся need_count результата
+local function wait_for_output(inv, result_id, need_count)
+    local waited = 0
+    while true do
+        local ok, list = pcall(inv.list)
+        if ok and type(list) == "table" then
+            local have = 0
+            for _, info in pairs(list) do
+                if type(info) == "table" and info.name == result_id then
+                    have = have + (info.count or 0)
+                end
+            end
+            if have >= need_count then
+                return true
+            end
+        end
+        os.sleep(3)
+        waited = waited + 3
+        if waited % 30 == 0 then
+            heartbeat()
+            print("  ...waiting for mechanism (" .. waited .. "s)")
+        end
+    end
+end
+
+-- ======================= КРАФТ НА ВЕРСТАКЕ =======================
+-- Сетка 3x3 = слоты 1,2,3 / 5,6,7 / 9,10,11 (CC:Tweaked 1.9).
+local GRID_SLOTS = { 1, 2, 3, 5, 6, 7, 9, 10, 11 }
+
+local function craft_step_table(step)
+    -- какие предметы в какие слоты сетки класть (на 1 крафт)
+    local cells = {}
+    if step.shapeless then
+        for _, ing in ipairs(step.ingredients or {}) do
+            local per = ing.count / (step.batches or 1)
+            for _ = 1, per do
+                table.insert(cells, { slot = GRID_SLOTS[#cells + 1], id = ing.id })
+            end
+        end
+    else
+        local grid = step.grid or {}
+        for i = 1, 9 do
+            if grid[i] then
+                table.insert(cells, { slot = GRID_SLOTS[i], id = grid[i] })
+            end
+        end
+    end
+    if #cells == 0 then
+        return false, "empty recipe grid for " .. tostring(step.result)
+    end
+
+    local batches = math.max(1, step.batches or 1)
+    local per_craft = math.max(1, math.floor((step.count or 1) / batches))
+    local remaining = batches
+
+    while remaining > 0 do
+        if not empty_turtle(nil) then
+            return false, "turtle can't empty itself - are all vaults full?"
+        end
+        local want = math.min(remaining, 64, math.floor(7 * 64 / per_craft))
+        if want < 1 then want = 1 end
+
+        local runs = want
+        for _, cell in ipairs(cells) do
+            local got = pull_into_slot(cell.id, cell.slot, want)
+            if got <= 0 then
+                empty_turtle(nil)
+                return false, "not enough in storage: " .. cell.id
+            end
+            if got < runs then runs = got end
+        end
+
+        turtle.select(1)
+        if not turtle.craft(runs) then
+            empty_turtle(nil)
+            return false, "crafting failed for " .. tostring(step.result)
+        end
+
+        empty_turtle(step.destination)
+        remaining = remaining - runs
+        print("  " .. tostring(step.result) .. " +" .. (runs * per_craft)
+            .. "  (" .. (batches - remaining) .. "/" .. batches .. ")")
+    end
+    return true
+end
+
+-- ======================= КРАФТ ЧЕРЕЗ СТАНОК =======================
 local function craft_step_mechanism(step)
-    local inName = resolve_name(step.mechanism_input) or step.mechanism_input
-    local outName = resolve_name(step.mechanism_output) or step.mechanism_output
-    local input = peripheral.wrap(inName)
-    local output = peripheral.wrap(outName)
-    if not input or not output then error("mechanism not found") end
+    local mech_in = wrap_storage(step.mechanism_input or "")
+    if not mech_in then
+        return false, "cannot find mechanism input: " .. tostring(step.mechanism_input)
+    end
+    local mech_out = wrap_storage(step.mechanism_output or "")
+    if not mech_out then
+        return false, "cannot find mechanism output: " .. tostring(step.mechanism_output)
+    end
 
-    local result = step.result
-    local per_craft = (step.count or 0) / (step.batches or 1)
-    local batches = step.batches or 1
+    local batches = math.max(1, step.batches or 1)
+    local per_craft = math.max(1, math.floor((step.count or 1) / batches))
 
-    -- чужие вещи не трогаем: убираем из выхода только НАШ результат
-    drain_to_vaults(output, step.destination, outName, result)
+    -- сколько каждого ингредиента нужно на 1 крафт
+    local per_batch = {}
+    for _, ing in ipairs(step.ingredients or {}) do
+        if ing.id and ing.count and ing.count > 0 then
+            table.insert(per_batch, { id = ing.id, count = ing.count / batches })
+        end
+    end
+    if #per_batch == 0 then
+        return false, "no ingredients for " .. tostring(step.result)
+    end
 
-    local idset = {}
-    for _, ing in ipairs(step.ingredients) do idset[ing.id] = true end
+    -- чужое в выходе не трогаем: убираем только НАШ результат
+    drain_only(mech_out, step.destination, step.result)
 
     local remaining = batches
     while remaining > 0 do
-        -- размер порции: не больше СТАКА (64) на ингредиент на 1 крафт
-        -- (на депо больше стака положить нельзя), и чтобы влезало
-        -- в 16 слотов черепашки
-        local runs = remaining
-        local minPerBatch = nil
-        for _, ing in ipairs(step.ingredients) do
-            local per = ing.count / batches
-            if not minPerBatch or per < minPerBatch then minPerBatch = per end
+        if not empty_turtle(nil) then
+            return false, "turtle can't empty itself - are all vaults full?"
         end
-        runs = math.min(runs, math.floor(64 / math.max(1, minPerBatch)))
+
+        -- размер порции: влезает в 16 слотов И не больше стака
+        -- на ингредиент на крафт (депо больше стака не берёт)
+        local runs = remaining
+        local minPer = nil
+        for _, ing in ipairs(per_batch) do
+            if not minPer or ing.count < minPer then minPer = ing.count end
+        end
+        runs = math.min(runs, math.floor(64 / math.max(1, minPer)))
         while runs > 1 do
             local slots = 0
-            for _, ing in ipairs(step.ingredients) do
+            for _, ing in ipairs(per_batch) do
                 slots = slots + math.ceil(ing.count * runs / 64)
             end
             if slots <= 16 then break end
@@ -544,75 +480,56 @@ local function craft_step_mechanism(step)
         end
         if runs < 1 then runs = 1 end
 
-        if not empty_turtle(nil) then
-            error("turtle not empty (vaults full?)")
-        end
-
-        -- набрать ингредиенты: ing.count -- ВСЕГО за шаг, поэтому на
-        -- порцию нужно (ing.count / batches) * runs штук.
-        -- КАЖДЫЙ ингредиент кладём в СВОИ слоты (подряд, не переиспользуя
-        -- слоты с другими предметами).
+        -- набрать ВСЕ ингредиенты (каждый -- по количеству на порцию)
         local pulled = {}
-        local nextSlot = 1
-        for _, ing in ipairs(step.ingredients) do
-            local per = ing.count / batches
-            local need = math.ceil(per * runs)
-            local have = 0
-            while have < need and nextSlot <= 16 do
-                local cur = pull_into_slot(ing.id, nextSlot, need - have)
-                if cur <= 0 then
-                    error("not enough in storage: " .. tostring(ing.id))
-                end
-                have = have + cur
-                nextSlot = nextSlot + 1
+        for _, ing in ipairs(per_batch) do
+            pull_from_any_vault(ing.id, math.ceil(ing.count * runs))
+            local got = count_item(ing.id)
+            pulled[ing.id] = got
+            if got < ing.count then
+                empty_turtle(nil)
+                return false, "not enough in storage: " .. ing.id
             end
-            pulled[ing.id] = have
+            local can = math.floor(got / ing.count)
+            if can < runs then runs = can end
         end
 
-        -- скормить машине
-        push_all_turtle_to(inName)
+        -- скормить станку
+        push_all_to_storage(mech_in)
 
-        -- сколько машина реально приняла (что осталось в черепашке -- не приняла)
-        local fed = runs
-        for _, ing in ipairs(step.ingredients) do
-            local per = ing.count / batches
-            local taken = pulled[ing.id] - count_item(ing.id)
-            fed = math.min(fed, math.floor(taken / per))
+        -- сколько станок реально принял (осталось в черепашке -- не принял)
+        local fed_runs = runs
+        for _, ing in ipairs(per_batch) do
+            local fed = pulled[ing.id] - count_item(ing.id)
+            local can = math.floor(fed / ing.count)
+            if can < fed_runs then fed_runs = can end
         end
-        if fed < 1 then
+        if fed_runs < 1 then
             empty_turtle(nil)
-            error("input won't accept")
+            return false, "mechanism input won't accept items: " .. tostring(step.mechanism_input)
         end
         empty_turtle(nil)
 
-        -- ЖДЁМ ПО КОЛИЧЕСТВУ, а не по времени: положили fed крафтов --
-        -- значит ждём ровно per_craft*fed результата, и пока его не будет,
-        -- НИЧЕГО не забираем. (wait_for_output ждёт бесконечно.)
-        wait_for_output(output, result, per_craft * fed)
+        -- ждём ПО КОЛИЧЕСТВУ: положили fed_runs крафтов -- ждём ровно
+        -- per_craft*fed_runs результата, пока его нет -- НЕ забираем
+        wait_for_output(mech_out, step.result, per_craft * fed_runs)
 
-        -- только теперь: вернуть ингредиенты, которые станок не потребил
-        local okL, listL = pcall(input.list)
-        if okL and type(listL) == "table" then
-            for slot, info in pairs(listL) do
-                if type(info) == "table" and idset[info.name] and (info.count or 0) > 0 then
-                    local rest = info.count
-                    for _, vname in ipairs(activeVaults) do
-                        if rest <= 0 then break end
-                        local okp, m = pcall(input.pushItems, resolve_name(vname) or vname, slot, rest)
-                        if okp and m and m > 0 then rest = rest - m end
-                    end
-                end
-            end
-        end
-
-        drain_to_vaults(output, step.destination, outName, result)
-        remaining = remaining - fed
-        print("mechanism: " .. tostring(result) .. " " ..
-            tostring(batches - remaining) .. "/" .. tostring(batches))
+        drain_only(mech_out, step.destination, step.result)
+        remaining = remaining - fed_runs
+        print("  " .. tostring(step.result) .. " +" .. (fed_runs * per_craft)
+            .. "  (" .. (batches - remaining) .. "/" .. batches .. ")")
     end
+    return true
 end
 
--- ======================= ИСПОЛНЕНИЕ ЗАКАЗА =======================
+local function craft_step(step)
+    if step.method == "mechanism" then
+        return craft_step_mechanism(step)
+    end
+    return craft_step_table(step)
+end
+
+-- ======================= ЗАКАЗЫ =======================
 local function step_ready(step)
     local ings = step.ingredients
     if not ings or #ings == 0 then
@@ -629,14 +546,6 @@ local function step_ready(step)
     return true
 end
 
-local function execute_step(step)
-    if step.method == "mechanism" then
-        craft_step_mechanism(step)
-    else
-        craft_step_table(step)
-    end
-end
-
 local function report_progress(order, made)
     api_post("/api/orders/progress", { order = order.id, step = made, status = "ok" })
 end
@@ -645,15 +554,29 @@ local function report_fail(order, msg)
     api_post("/api/orders/progress", { order = order.id, status = "fail", msg = tostring(msg) })
 end
 
--- Как CraftingCpuLogic.executeCrafting в AE2: проходы по шагам,
--- готовые выполняем, после каждого успеха пересканируем склад.
--- Если заказ уже был начат (step_done > 0) -- продолжаем с места
--- остановки, чтобы не перекрафчивать готовые шаги.
+-- Как AE2: проходим по шагам, выполняем готовые, после каждого успеха
+-- пересканируем. Продолжаем с step_done (после рестарта не перекрафчиваем).
 local function process_order(order)
     local steps = order.steps or {}
     if #steps == 0 then
         report_fail(order, "no steps")
         return
+    end
+
+    -- ищем ингредиенты не только в вольтах конфига, но и в вольтах,
+    -- куда шаги складывают результаты (destination)
+    activeVaults = {}
+    for _, v in ipairs(cfg_vaults()) do
+        table.insert(activeVaults, v)
+    end
+    for _, s in ipairs(steps) do
+        if s.destination and s.destination ~= "" then
+            local dup = false
+            for _, v in ipairs(activeVaults) do
+                if v == s.destination then dup = true end
+            end
+            if not dup then table.insert(activeVaults, s.destination) end
+        end
     end
 
     scan_all_vaults()
@@ -667,22 +590,26 @@ local function process_order(order)
     while made < #steps do
         local progressed = false
         for i, step in ipairs(steps) do
-            if not done[i] and step_ready(step) then
-                local ok, err = pcall(execute_step, step)
-                if ok then
-                    done[i] = true
-                    made = made + 1
-                    progressed = true
-                    scan_all_vaults()
-                    report_progress(order, made)
-                    if made >= #steps then return end
-                else
-                    lastErr = err
+            if not done[i] then
+                if step_ready(step) then
+                    print("Step " .. (made + 1) .. "/" .. #steps .. ": "
+                        .. tostring(step.result) .. " x" .. tostring(step.count))
+                    local ok, err = craft_step(step)
+                    if ok then
+                        done[i] = true
+                        made = made + 1
+                        progressed = true
+                        scan_all_vaults()
+                        report_progress(order, made)
+                        if made >= #steps then return end
+                    else
+                        lastErr = err
+                    end
                 end
             end
         end
         if not progressed then
-            -- вернуть всё, что накопилось в черепашке, в вольты
+            -- вернуть набранное в вольты и сообщить об ошибке
             pcall(empty_turtle, nil)
             report_fail(order, lastErr or "no progress")
             return
@@ -691,8 +618,7 @@ local function process_order(order)
 end
 
 -- ======================= МОНИТОР =======================
--- ЖЁСТКОЕ ПРАВИЛО: монитор только вплотную к черепашке (любой гранью),
--- по сети мониторы не подхватываются.
+-- Монитор только вплотную к черепашке (любой гранью).
 local DIRECT_SIDES = { top = true, bottom = true, left = true, right = true,
                        front = true, back = true }
 
@@ -719,39 +645,24 @@ local function setup_monitor()
     term.redirect(mon)
 end
 
-local function draw_screen(line1, line2)
-    term.clear()
-    term.setCursorPos(1, 1)
-    print("== Auto Crafter ==")
-    print("Turtle: " .. tostring(turtleName))
-    print("Vaults: " .. tostring(#activeVaults))
-    print(configOk and "SERVER LINK: OK" or "NO SERVER CONNECTION!")
-    if line1 then print(line1) end
-    if line2 then print(line2) end
+local function wline(s, w)
+    local t = tostring(s or "")
+    if #t > w then t = t:sub(1, w) end
+    term.write(t .. string.rep(" ", w - #t))
+    print("")
 end
 
--- Экран очереди: ВСЕ заказы с сервера (монитор большой).
--- Строки дополняются пробелами до ширины экрана, чтобы от прошлого
--- кадра не оставалось "хвостов" (артефактов).
 local function draw_queue_screen(orders)
     term.clear()
     term.setCursorPos(1, 1)
-    local w, h = term.getSize()
-    local function wline(s)
-        local t = tostring(s or "")
-        if #t > w then t = t:sub(1, w) end
-        term.write(t .. string.rep(" ", w - #t))
-        print("")
-    end
-
-    wline("== Auto Crafter ==")
-    wline("Turtle: " .. tostring(turtleName))
-    wline("Vaults: " .. tostring(#activeVaults))
-    wline(configOk and "SERVER LINK: OK" or "NO SERVER CONNECTION!")
-    wline("Queue:")
-
+    local w, _ = term.getSize()
+    wline("== Auto Crafter ==", w)
+    wline("Turtle: " .. tostring(current_turtle_name()), w)
+    wline("Vaults: " .. tostring(#cfg_vaults()), w)
+    wline(configOk and "SERVER LINK: OK" or "NO SERVER CONNECTION!", w)
+    wline("Queue:", w)
     if not orders or #orders == 0 then
-        wline("  (пусто)")
+        wline("  (пусто)", w)
         return
     end
     for i = 1, #orders do
@@ -768,7 +679,7 @@ local function draw_queue_screen(orders)
             elseif st == "done" then mark = "[OK]"
             elseif st == "failed" then mark = "[X]"
             elseif st == "missing" then mark = "[!]" end
-            wline(" " .. mark .. " " .. name .. " x" .. tostring(cnt))
+            wline(" " .. mark .. " " .. name .. " x" .. tostring(cnt), w)
         end
     end
 end
@@ -780,31 +691,39 @@ local function main()
     print("CC Storage Server: auto crafter")
     print("Server: " .. CONFIG.server_url)
     setup_monitor()
-    turtleName = get_turtle_network_name()
+    fetch_server_config()
 
     local iter = 0
     while true do
         iter = iter + 1
-
         if iter % 4 == 1 then
             configOk = fetch_server_config()
-            if not turtleName then
-                turtleName = SERVER_CONFIG.turtle_name
-            end
         end
 
         -- heartbeat всегда, чтобы сайт видел черепашку на связи
         heartbeat()
 
-        if scan_all_vaults() == 0 then
-            draw_screen("NO VAULT REACHABLE", "add vaults in config or check wired network")
+        activeVaults = cfg_vaults()
+        local anyVault = false
+        for _, v in ipairs(activeVaults) do
+            if wrap_storage(v) then anyVault = true break end
+        end
+
+        if not anyVault then
+            term.clear()
+            term.setCursorPos(1, 1)
+            print("NO VAULT REACHABLE")
+            print("Добавь вольты в настройках сайта")
+            print("или проверь проводную сеть!")
             os.sleep(5)
         else
             local data = api_get("/api/orders/next")
-            local order = data and data.order
-            if order then
-                draw_screen("Order #" .. tostring(order.id) .. ": " .. tostring(order.item))
-                pcall(process_order, order)
+            if data and data.order then
+                term.clear()
+                term.setCursorPos(1, 1)
+                print("Order #" .. tostring(data.order.id) .. ": "
+                    .. tostring(data.order.item) .. " x" .. tostring(data.order.count))
+                pcall(process_order, data.order)
             else
                 local ordData = api_get("/api/orders")
                 draw_queue_screen(ordData and ordData.orders or nil)
