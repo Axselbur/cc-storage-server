@@ -949,11 +949,22 @@ header {
       d.users.forEach(function (u) {
         var row = document.createElement("div");
         row.className = "vrow";
+        row.style.flexWrap = "wrap";
         row.innerHTML = '<div class="vName" style="flex:1;margin-bottom:0;">' + esc(u.username) +
-          ' <span class="muted">[' + esc(u.role) + "]</span></div>" +
+          ' <span class="muted">[' + esc(u.role) + "]</span>" +
+          (u.last_ip ? ' <span class="muted" style="font-size:10px;">' + esc(u.last_ip) + "</span>" : "") +
+          "</div>" +
+          '<button class="uBan" title="забанить по IP">🚫</button>' +
           '<button class="uPass" title="сменить пароль">🔑</button>' +
           '<button class="uKick" title="кикнуть с аккаунта">⚡</button>' +
           '<button class="uDel" title="удалить">🗑</button>';
+        row.querySelector(".uBan").addEventListener("click", function () {
+          if (!u.last_ip) { alert("У пользователя нет сохранённого IP (он ещё не входил)"); return; }
+          if (!confirm("Забанить IP " + u.last_ip + "?")) return;
+          api("/api/bans", { method: "POST", body: { ip: u.last_ip } })
+            .then(function () { renderBansBox(); })
+            .catch(function (e) { alert(e.message); });
+        });
         row.querySelector(".uPass").addEventListener("click", function () {
           var p = prompt("Новый пароль для " + u.username);
           if (p) {

@@ -1380,7 +1380,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not self._require_admin():
                     return
                 self._json(200, {
-                    "users": [{"username": k, "role": v.get("role", "user")}
+                    "users": [{"username": k, "role": v.get("role", "user"),
+                               "last_ip": v.get("last_ip")}
                               for k, v in USERS["users"].items()],
                 })
 
@@ -1579,6 +1580,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json(401, {"error": "Неверный логин или пароль"})
             return
         token = make_session_token(username)
+        ip = self._client_ip()
+        if u.get("last_ip") != ip:
+            u["last_ip"] = ip
+            save_users()
         self._send(200, json.dumps({"ok": True, "user": {"username": username,
                                                          "role": u.get("role", "user")}}),
                    extra={"Set-Cookie": "session=%s; Path=/; HttpOnly; SameSite=Lax; Max-Age=%d"
