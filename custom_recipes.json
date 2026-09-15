@@ -277,7 +277,7 @@
     "method": "mechanism",
     "ingredients": [
       {
-        "item": "minecraft:coal_block",
+        "item": "create_netherless:coal_rod",
         "count": 1
       }
     ],
