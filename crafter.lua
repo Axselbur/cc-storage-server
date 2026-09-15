@@ -343,8 +343,29 @@ local function drain_only(inv, destination, only_item)
 end
 
 -- ======================= КРАФТ НА ВЕРСТАКЕ =======================
--- Сетка 3x3 = слоты 1,2,3 / 5,6,7 / 9,10,11 (CC:Tweaked 1.9).
-local GRID_SLOTS = { 1, 2, 3, 5, 6, 7, 9, 10, 11 }
+-- Раскладка сетки зависит от версии CC, поэтому пробуем обе:
+-- сперва linear (слоты 1-9 подряд -- судя по твоему серверу), при
+-- неудаче перекладываем в corner (угол 4x4: 1,2,3/5,6,7/9,10,11)
+-- и пробуем снова. Какая сработала -- ту и запоминаем.
+local GRID_MODES = {
+    { slots = { 1, 2, 3, 4, 5, 6, 7, 8, 9 } },      -- linear
+    { slots = { 1, 2, 3, 5, 6, 7, 9, 10, 11 } },    -- corner
+}
+local gridOrder = { 1, 2 }
+
+local function relocate_slots(fromSlots, toSlots)
+    for i = 1, 9 do
+        local from = fromSlots[i]
+        local to = toSlots[i]
+        if from ~= to then
+            local count = turtle.getItemCount(from)
+            if count > 0 then
+                turtle.select(from)
+                turtle.transferTo(to, count)
+            end
+        end
+    end
+end
 
 local function craft_step_table(step)
     -- какие предметы в какие слоты сетки класть (на 1 крафт)
@@ -353,14 +374,14 @@ local function craft_step_table(step)
         for _, ing in ipairs(step.ingredients or {}) do
             local per = ing.count / (step.batches or 1)
             for _ = 1, per do
-                table.insert(cells, { slot = GRID_SLOTS[#cells + 1], id = ing.id })
+                table.insert(cells, { pos = #cells + 1, id = ing.id })
             end
         end
     else
         local grid = step.grid or {}
         for i = 1, 9 do
             if grid[i] then
-                table.insert(cells, { slot = GRID_SLOTS[i], id = grid[i] })
+                table.insert(cells, { pos = i, id = grid[i] })
             end
         end
     end
@@ -379,9 +400,11 @@ local function craft_step_table(step)
         local want = math.min(remaining, 64, math.floor(7 * 64 / per_craft))
         if want < 1 then want = 1 end
 
+        -- набрать предметы в предпочтительную раскладку
+        local slots = GRID_MODES[gridOrder[1]].slots
         local runs = want
         for _, cell in ipairs(cells) do
-            local got = pull_into_slot(cell.id, cell.slot, want)
+            local got = pull_into_slot(cell.id, slots[cell.pos], want)
             if got <= 0 then
                 empty_turtle(nil)
                 return false, "not enough in storage: " .. cell.id
@@ -389,8 +412,26 @@ local function craft_step_table(step)
             if got < runs then runs = got end
         end
 
-        turtle.select(1)
-        if not turtle.craft(runs) then
+        -- крафт; если раскладка не подошла -- пробуем альтернативную
+        local crafted = false
+        for k = 1, #gridOrder do
+            if k > 1 then
+                relocate_slots(GRID_MODES[gridOrder[1]].slots,
+                    GRID_MODES[gridOrder[k]].slots)
+                print("  layout " .. tostring(gridOrder[1])
+                    .. " failed, trying " .. tostring(gridOrder[k]))
+            end
+            turtle.select(1)
+            if turtle.craft(runs) then
+                crafted = true
+                if k > 1 then
+                    gridOrder = { gridOrder[k], gridOrder[1] }
+                    print("  grid layout switched")
+                end
+                break
+            end
+        end
+        if not crafted then
             empty_turtle(nil)
             return false, "crafting failed for " .. tostring(step.result)
         end
