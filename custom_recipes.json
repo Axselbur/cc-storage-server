@@ -154,10 +154,6 @@
       {
         "item": "create:large_cogwheel",
         "count": 5
-      },
-      {
-        "item": "create:large_cogwheel",
-        "count": 5
       }
     ],
     "auto_enabled": true,
