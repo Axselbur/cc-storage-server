@@ -539,10 +539,12 @@ local function craft_step_mechanism(step)
             error("turtle not empty (vaults full?)")
         end
 
-        -- набрать ингредиенты
+        -- набрать ингредиенты: ing.count -- ВСЕГО за шаг, поэтому на
+        -- порцию нужно (ing.count / batches) * runs штук
         local pulled = {}
         for _, ing in ipairs(step.ingredients) do
-            local need = math.ceil(ing.count * runs)
+            local per = ing.count / batches
+            local need = math.ceil(per * runs)
             local have = 0
             for slot = 1, 16 do
                 if have >= need then break end
@@ -558,8 +560,9 @@ local function craft_step_mechanism(step)
         -- сколько машина реально приняла (что осталось в черепашке -- не приняла)
         local fed = runs
         for _, ing in ipairs(step.ingredients) do
+            local per = ing.count / batches
             local taken = pulled[ing.id] - count_item(ing.id)
-            fed = math.min(fed, math.floor(taken / ing.count))
+            fed = math.min(fed, math.floor(taken / per))
         end
         if fed < 1 then
             empty_turtle(nil)
