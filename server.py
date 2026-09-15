@@ -511,9 +511,58 @@ def save_custom_recipes():
     _github_commit_file_async("custom_recipes.json", "Update custom recipes")
 
 
+def _borrow_dump_grid(output, ingredients):
+    """Пользовательский рецепт не описывает ФОРМУ. Если в дампе есть
+    shaped-рецепт того же предмета с теми же ингредиентами -- берём его
+    сетку, чтобы черепашка крафтила по реальной форме (вертикаль,
+    кольцо и т.п.), а не раскладывала подряд."""
+    if not RECIPES_BY_RESULT:
+        return None
+    want = {}
+    for i in ingredients:
+        key = i.get("item") or i.get("id")
+        if key:
+            want[str(key)] = want.get(str(key), 0) + int(i.get("count", 1))
+
+    def cell_matches(cell, cid):
+        if not cell:
+            return False
+        if cell.get("id") == cid:
+            return True
+        if "tag" in cell and cid in resolve_tag(cell["tag"]):
+            return True
+        return False
+
+    for r in RECIPES_BY_RESULT.get(output, []):
+        if r.get("custom") or not r.get("grid"):
+            continue
+        cells = [c for row in r["grid"] for c in row if c is not None]
+        if len(cells) != sum(want.values()):
+            continue
+        ids = []
+        for cid, cnt in want.items():
+            ids += [cid] * cnt
+        used = [False] * len(cells)
+        ok = True
+        for cid in ids:
+            found = False
+            for idx, cell in enumerate(cells):
+                if not used[idx] and cell_matches(cell, cid):
+                    used[idx] = True
+                    found = True
+                    break
+            if not found:
+                ok = False
+                break
+        if ok:
+            return r["grid"]
+    return None
+
+
 def rebuild_custom_recipe_index():
     """Re-insert current custom recipes into the planner indexes as
-    craftable shapeless recipes with method/destination/mechanism_*."""
+    craftable recipes with method/destination/mechanism_*.
+    Форму (сетку) берём из дампа, если такой рецепт там есть."""
     global RECIPES_BY_RESULT, RECIPES_BY_INPUT
     for index in (RECIPES_BY_RESULT, RECIPES_BY_INPUT):
         for key in list(index.keys()):
@@ -523,12 +572,16 @@ def rebuild_custom_recipe_index():
             else:
                 del index[key]
     for cr in CUSTOM_RECIPES:
+        inputs = [{"id": str(i.get("item")), "count": int(i.get("count", 1))}
+                  for i in cr.get("ingredients", []) if i.get("item")]
+        grid = None
+        if cr.get("method", "table") == "table":
+            grid = _borrow_dump_grid(cr["output"], inputs)
         recipe = {
             "id": cr.get("id", "custom"),
             "type": "minecraft:crafting_shapeless",
-            "grid": None,
-            "inputs": [{"id": str(i.get("item")), "count": int(i.get("count", 1))}
-                       for i in cr.get("ingredients", []) if i.get("item")],
+            "grid": grid,
+            "inputs": inputs,
             "results": [{"id": cr["output"], "count": int(cr.get("output_count", 1))}],
             "custom": True,
             "method": cr.get("method", "table"),
@@ -1057,9 +1110,14 @@ def _auto_maintain_tick():
         have = stock.get(item, 0)
         if have >= target:
             continue
-        if any(o.get("item") == item and o.get("status") in ("queued", "crafting")
+        # не спамим: пропускаем, если уже есть активный заказ или
+        # недавний (10 мин) провал по этому предмету
+        if any(o.get("item") == item and (
+                o.get("status") in ("queued", "crafting")
+                or (o.get("status") == "failed"
+                    and time.time() - (o.get("created_at") or 0) < 600))
                for o in orders):
-            continue  # уже докрафчиваем
+            continue
         need = target - have
         res = _replan_order(item, need)
         if res is None:
