@@ -77,8 +77,8 @@
         "count": 1
       }
     ],
-    "auto_enabled": false,
-    "auto_target": 0,
+    "auto_enabled": true,
+    "auto_target": 64,
     "destination": null,
     "mechanism_input": "",
     "mechanism_output": ""
