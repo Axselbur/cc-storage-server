@@ -298,13 +298,14 @@ local function empty_turtle(destination)
 end
 
 -- Все слоты чужого инвентаря -> destination, затем вольты по очереди.
-local function drain_to_vaults(inv, destination, sourceName)
+-- Если задан onlyItem -- двигаем ТОЛЬКО этот предмет (чужие вещи не трогаем).
+local function drain_to_vaults(inv, destination, sourceName, onlyItem)
     if not inv then return end
     local ok, list = pcall(inv.list)
     if not ok then return end
     for slot, item in pairs(list) do
         local count = item.count
-        if count > 0 then
+        if count > 0 and (not onlyItem or item.name == onlyItem) then
             local targets = {}
             if destination and destination ~= "" then
                 table.insert(targets, resolve_name(destination) or destination)
@@ -524,12 +525,23 @@ local function craft_step_mechanism(step)
     local output = peripheral.wrap(outName)
     if not input or not output then error("mechanism not found") end
 
+    -- защита от неверной настройки: вход/выход не должны указывать на вольт
+    for _, v in ipairs(cfg_vaults()) do
+        local rv = resolve_name(v)
+        if rv and rv == inName then
+            error("mechanism_input указывает на вольт: " .. tostring(inName))
+        end
+        if rv and rv == outName then
+            error("mechanism_output указывает на вольт: " .. tostring(outName))
+        end
+    end
+
     local result = step.result
     local per_craft = (step.count or 0) / (step.batches or 1)
     local batches = step.batches or 1
 
-    -- чужой результат в выходе не считаем
-    drain_to_vaults(output, step.destination, outName)
+    -- чужие вещи не трогаем: убираем из выхода только НАШ результат
+    drain_to_vaults(output, step.destination, outName, result)
 
     local idset = {}
     for _, ing in ipairs(step.ingredients) do idset[ing.id] = true end
@@ -608,7 +620,7 @@ local function craft_step_mechanism(step)
             end
         end
 
-        drain_to_vaults(output, step.destination, outName)
+        drain_to_vaults(output, step.destination, outName, result)
         remaining = remaining - fed
         print("mechanism: " .. tostring(result) .. " " ..
             tostring(batches - remaining) .. "/" .. tostring(batches))
@@ -685,6 +697,8 @@ local function process_order(order)
             end
         end
         if not progressed then
+            -- вернуть всё, что накопилось в черепашке, в вольты
+            pcall(empty_turtle, nil)
             report_fail(order, lastErr or "no progress")
             return
         end

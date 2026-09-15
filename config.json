@@ -11,7 +11,7 @@
   "packagers": [],
   "packager_target": "create_connected:item_silo_75",
   "buffer_chest": "",
-  "auto_balance": true,
-  "auto_balance_interval": 600000000000000,
+  "auto_balance": false,
+  "auto_balance_interval": 600,
   "vault_capacity": 103680
 }

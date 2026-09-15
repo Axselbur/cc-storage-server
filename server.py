@@ -39,7 +39,7 @@ CONFIG_DEFAULTS = {
     "packagers": [],         # packager peripherals
     "packager_target": "",   # where packagers push into
     "buffer_chest": "",      # buffer chest to distribute into vaults
-    "auto_balance": True,    # keep vaults evenly filled automatically
+    "auto_balance": False,   # keep vaults evenly filled (включается вручную на сайте)
     "auto_balance_interval": 600,  # seconds between auto-balance runs
     "vault_capacity": 4096,  # assumed items per vault (for the monitor fill bars)
 }

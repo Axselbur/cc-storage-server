@@ -36,7 +36,7 @@ local CONFIG = {
     fallback_packagers = {},
     fallback_packager_target = "",
     fallback_buffer_chest = "",
-    fallback_auto_balance = true,
+    fallback_auto_balance = false,
     fallback_auto_balance_interval = 600,
     fallback_vault_capacity = 4096,
 
