@@ -17,8 +17,8 @@
       "last_ip": "88.147.152.195"
     },
     "Enly": {
-      "salt": "0488d8f8a89f6af4148a2a826fcc4b5b",
-      "hash": "95f1bb4c3661633390b99b861aa915f2dbd2b8d003f033cdbe10f48c0027e953",
+      "salt": "3ef5658b165d2f8c4dedf2aeed73c48d",
+      "hash": "9e07448bf2877ee6363888c5734143a502e37603639c26e14af8820dde89fb6b",
       "role": "user"
     }
   },
