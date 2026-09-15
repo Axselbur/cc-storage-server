@@ -690,14 +690,10 @@ class _Planner(object):
 class _Node(object):
     """"We need N of this ingredient": take from stock, craft the rest."""
 
-    def __init__(self, planner, entry, parent, no_craft=False):
+    def __init__(self, planner, entry, parent):
         self.planner = planner
         self.entry = entry
         self.parent = parent
-        # no_craft: ингредиенты берём ТОЛЬКО со склада, ничего не
-        # докрафчиваем (для механизмов -- станку нужны именно те
-        # предметы, что указаны в рецепте)
-        self.no_craft = no_craft
         self.candidates = planner._ingredient_options(entry)
         self.chain = set()
         if parent is not None:
@@ -765,29 +761,28 @@ class _Node(object):
                 inv.extract(cand, take)
                 consumed[cand] = consumed.get(cand, 0) + take
                 remaining -= take
-        # 2) craft the rest through processes
-        #    (для no_craft -- пропускаем: станок должен получить именно
-        #    те предметы, что указаны в рецепте, без докрафчивания)
-        if not self.no_craft:
-            for cand in self._sorted_candidates(inv):
-                if remaining <= 0:
-                    break
-                while remaining > 0:
-                    progressed = False
-                    for recipe in self._recipes_allowed(cand):
-                        if remaining <= 0:
-                            break
-                        proc = _Process(self.planner, recipe, self)
-                        produced = proc.try_produce(inv, remaining)
-                        if produced > 0:
-                            take = min(produced, remaining)
-                            inv.extract(cand, take)
-                            consumed[cand] = consumed.get(cand, 0) + take
-                            remaining -= take
-                            progressed = True
-                            break
-                    if not progressed:
+        # 2) craft the rest through processes (по импортированным
+        #    рецептам: сперва крафтим недостающее на черепашке, и только
+        #    потом эти предметы пойдут в станок)
+        for cand in self._sorted_candidates(inv):
+            if remaining <= 0:
+                break
+            while remaining > 0:
+                progressed = False
+                for recipe in self._recipes_allowed(cand):
+                    if remaining <= 0:
                         break
+                    proc = _Process(self.planner, recipe, self)
+                    produced = proc.try_produce(inv, remaining)
+                    if produced > 0:
+                        take = min(produced, remaining)
+                        inv.extract(cand, take)
+                        consumed[cand] = consumed.get(cand, 0) + take
+                        remaining -= take
+                        progressed = True
+                        break
+                if not progressed:
+                    break
         # 3) shortage
         if remaining > 0:
             key = self.candidates[0] if self.candidates else ("tag:" + str(self.entry.get("tag", "?")))
@@ -805,9 +800,7 @@ class _Process(object):
         self.recipe = recipe
         self.node = node
         self.cells = _recipe_cells(recipe)
-        self.children = [(c, _Node(planner, c, node,
-                                   no_craft=(recipe.get("method") == "mechanism")))
-                         for c in self.cells]
+        self.children = [(c, _Node(planner, c, node)) for c in self.cells]
         self.per_craft = recipe["results"][0]["count"]
         in_ids = set()
         for c in self.cells:
