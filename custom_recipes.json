@@ -114,23 +114,5 @@
     "destination": "create_connected:item_silo_102",
     "mechanism_input": "create:depot_9",
     "mechanism_output": "create:depot_9"
-  },
-  {
-    "id": "custom:1789340628240",
-    "output": "create_connected:item_silo",
-    "output_count": 1,
-    "method": "table",
-    "ingredients": [
-      {
-        "item": "minecraft:barrel",
-        "count": 1
-      },
-      {
-        "item": "create:iron_sheet",
-        "count": 2
-      }
-    ],
-    "auto_enabled": false,
-    "auto_target": 0
   }
 ]
