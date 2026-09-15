@@ -269,5 +269,22 @@
     "destination": "create_connected:item_silo_102",
     "mechanism_input": "create:depot_9",
     "mechanism_output": "create:depot_9"
+  },
+  {
+    "id": "custom:1789491018982",
+    "output": "minecraft:blaze_rod",
+    "output_count": 1,
+    "method": "mechanism",
+    "ingredients": [
+      {
+        "item": "minecraft:coal_block",
+        "count": 1
+      }
+    ],
+    "auto_enabled": true,
+    "auto_target": 128,
+    "destination": "create_connected:item_silo_102",
+    "mechanism_input": "minecraft:hopper_1",
+    "mechanism_output": "minecraft:barrel_4"
   }
 ]
