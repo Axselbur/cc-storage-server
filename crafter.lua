@@ -342,31 +342,6 @@ local function drain_only(inv, destination, only_item)
     end
 end
 
--- Ждать по количеству: пока в inv не наберётся need_count результата
-local function wait_for_output(inv, result_id, need_count)
-    local waited = 0
-    while true do
-        local ok, list = pcall(inv.list)
-        if ok and type(list) == "table" then
-            local have = 0
-            for _, info in pairs(list) do
-                if type(info) == "table" and info.name == result_id then
-                    have = have + (info.count or 0)
-                end
-            end
-            if have >= need_count then
-                return true
-            end
-        end
-        os.sleep(3)
-        waited = waited + 3
-        if waited % 30 == 0 then
-            heartbeat()
-            print("  ...waiting for mechanism (" .. waited .. "s)")
-        end
-    end
-end
-
 -- ======================= КРАФТ НА ВЕРСТАКЕ =======================
 -- Сетка 3x3 = слоты 1,2,3 / 5,6,7 / 9,10,11 (CC:Tweaked 1.9).
 local GRID_SLOTS = { 1, 2, 3, 5, 6, 7, 9, 10, 11 }
@@ -429,6 +404,18 @@ local function craft_step_table(step)
 end
 
 -- ======================= КРАФТ ЧЕРЕЗ СТАНОК =======================
+local function count_in_inventory(inv, id)
+    local ok, list = pcall(inv.list)
+    if not ok or type(list) ~= "table" then return 0 end
+    local total = 0
+    for _, info in pairs(list) do
+        if type(info) == "table" and info.name == id then
+            total = total + (info.count or 0)
+        end
+    end
+    return total
+end
+
 local function craft_step_mechanism(step)
     local mech_in = wrap_storage(step.mechanism_input or "")
     if not mech_in then
@@ -441,6 +428,7 @@ local function craft_step_mechanism(step)
 
     local batches = math.max(1, step.batches or 1)
     local per_craft = math.max(1, math.floor((step.count or 1) / batches))
+    local total_needed = step.count or 1
 
     -- сколько каждого ингредиента нужно на 1 крафт
     local per_batch = {}
@@ -456,11 +444,16 @@ local function craft_step_mechanism(step)
     -- чужое в выходе не трогаем: убираем только НАШ результат
     drain_only(mech_out, step.destination, step.result)
 
-    local remaining = batches
-    while remaining > 0 do
+    -- СТАНОК МОЖЕТ ДАВАТЬ ХЛАМ (шанс): собираем результат, пока его не
+    -- наберётся total_needed -- если нужно, крафтим с излишком.
+    local collected = 0
+    while collected < total_needed do
         if not empty_turtle(nil) then
             return false, "turtle can't empty itself - are all vaults full?"
         end
+
+        -- сколько крафтов осталось дособрать
+        local remaining = math.max(1, math.ceil((total_needed - collected) / per_craft))
 
         -- размер порции: влезает в 16 слотов И не больше стака
         -- на ингредиент на крафт (депо больше стака не берёт)
@@ -510,14 +503,34 @@ local function craft_step_mechanism(step)
         end
         empty_turtle(nil)
 
-        -- ждём ПО КОЛИЧЕСТВУ: положили fed_runs крафтов -- ждём ровно
-        -- per_craft*fed_runs результата, пока его нет -- НЕ забираем
-        wait_for_output(mech_out, step.result, per_craft * fed_runs)
+        -- ждём результат: либо накопилось нужное, либо 3 минуты без
+        -- прогресса (станок наделал хлам) -- тогда забираем что есть
+        -- и докрафчиваем дальше (излишек ничему не мешает)
+        local need_now = per_craft * fed_runs
+        local waited = 0
+        local lastHave = 0
+        while true do
+            local have = count_in_inventory(mech_out, step.result)
+            if have >= need_now then break end
+            if have ~= lastHave then
+                lastHave = have
+                waited = 0
+            end
+            os.sleep(3)
+            waited = waited + 3
+            if waited >= 180 then break end
+            if waited % 30 == 0 then
+                heartbeat()
+                print("  ...waiting: " .. tostring(step.result)
+                    .. " " .. tostring(have) .. "/" .. tostring(need_now))
+            end
+        end
 
+        local made = count_in_inventory(mech_out, step.result)
         drain_only(mech_out, step.destination, step.result)
-        remaining = remaining - fed_runs
-        print("  " .. tostring(step.result) .. " +" .. (fed_runs * per_craft)
-            .. "  (" .. (batches - remaining) .. "/" .. batches .. ")")
+        collected = collected + made
+        print("  " .. tostring(step.result) .. " +" .. made
+            .. "  (" .. math.min(collected, total_needed) .. "/" .. total_needed .. ")")
     end
     return true
 end

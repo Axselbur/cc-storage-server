@@ -68,7 +68,48 @@ BALANCE_STATE = {
 # ---------------- users / sessions / bans ----------------
 USERS_FILE = os.path.join(BASE_DIR, "users.json")
 USERS = {"users": {}, "bans": {}}   # users.json: {"users": {name: {...}}, "bans": {ip: {...}}}
-SESSIONS = {}                       # token -> {"username", "ip", "created"}
+KICKED = {}                         # username -> kicked_until (сессии-токены статeless)
+
+
+SESSION_TTL = 4 * 3600  # сессия живёт 4 часа
+
+
+def session_secret():
+    """Стабильный секрет для подписи сессий (переживает рестарты)."""
+    admin = USERS["users"].get("admin") or {}
+    salt = admin.get("salt", "nosalt")
+    return hashlib.sha256((DEVICE_KEY + ":" + salt).encode("utf-8")).hexdigest()
+
+
+def make_session_token(username):
+    exp = int(time.time()) + SESSION_TTL
+    payload = "%s.%d" % (username, exp)
+    sig = hmac.new(session_secret().encode("utf-8"), payload.encode("utf-8"),
+                   hashlib.sha256).hexdigest()
+    return payload + "." + sig
+
+
+def verify_session_token(token):
+    try:
+        username, exp_s, sig = token.split(".", 2)
+    except ValueError:
+        return None
+    if username not in USERS["users"]:
+        return None
+    payload = "%s.%s" % (username, exp_s)
+    expected = hmac.new(session_secret().encode("utf-8"), payload.encode("utf-8"),
+                        hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, sig):
+        return None
+    try:
+        exp = int(exp_s)
+    except ValueError:
+        return None
+    if time.time() > exp:
+        return None
+    if KICKED.get(username) and time.time() < KICKED[username]:
+        return None
+    return username
 
 
 def hash_password(password, salt_hex):
@@ -1104,15 +1145,14 @@ class Handler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _cookie_value(header, name):
-        m = re.search(r"(?:^|;\s*)%s=([a-zA-Z0-9]+)" % re.escape(name), header or "")
+        m = re.search(r"(?:^|;\s*)%s=([A-Za-z0-9_.-]+)" % re.escape(name), header or "")
         return m.group(1) if m else None
 
     def _session_user(self):
         token = self._cookie_value(self.headers.get("Cookie", ""), "session")
         if not token:
             return None
-        sess = SESSIONS.get(token)
-        return sess["username"] if sess else None
+        return verify_session_token(token)
 
     def _is_device(self):
         if not DEVICE_KEY:
@@ -1178,11 +1218,9 @@ class Handler(BaseHTTPRequestHandler):
                     self._serve_file("login.html", "text/html; charset=utf-8")
 
             elif path == "/logout":
-                token = self._cookie_value(self.headers.get("Cookie", ""), "session")
-                if token:
-                    SESSIONS.pop(token, None)
                 self._send(302, "", "text/html; charset=utf-8",
-                           {"Location": "/login"})
+                           {"Location": "/login",
+                            "Set-Cookie": "session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"})
 
             elif path == "/api/me":
                 if not self._require_login():
@@ -1371,12 +1409,8 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 data = self._read_json() or {}
                 username = str(data.get("username") or "").strip()
-                removed = 0
-                for token in list(SESSIONS.keys()):
-                    if SESSIONS[token]["username"] == username:
-                        SESSIONS.pop(token, None)
-                        removed += 1
-                self._json(200, {"ok": True, "removed": removed})
+                KICKED[username] = time.time() + SESSION_TTL
+                self._json(200, {"ok": True})
             elif path == "/api/config":
                 if not self._require_login():
                     return
@@ -1457,9 +1491,7 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(400, {"error": "нельзя удалить последнего админа"})
                     return
                 del USERS["users"][name]
-                for token in list(SESSIONS.keys()):
-                    if SESSIONS[token]["username"] == name:
-                        SESSIONS.pop(token, None)
+                KICKED[name] = time.time() + SESSION_TTL
                 save_users()
                 self._json(200, {"ok": True})
             elif path == "/api/bans":
@@ -1488,12 +1520,11 @@ class Handler(BaseHTTPRequestHandler):
         if not u or u.get("hash") != hash_password(password, u.get("salt", "")):
             self._json(401, {"error": "Неверный логин или пароль"})
             return
-        token = secrets.token_hex(24)
-        SESSIONS[token] = {"username": username, "ip": self._client_ip(),
-                           "created": time.time()}
+        token = make_session_token(username)
         self._send(200, json.dumps({"ok": True, "user": {"username": username,
                                                          "role": u.get("role", "user")}}),
-                   extra={"Set-Cookie": "session=%s; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800" % token})
+                   extra={"Set-Cookie": "session=%s; Path=/; HttpOnly; SameSite=Lax; Max-Age=%d"
+                          % (token, SESSION_TTL)})
 
     def _handle_user_add(self):
         data = self._read_json() or {}
@@ -1540,9 +1571,7 @@ class Handler(BaseHTTPRequestHandler):
         USERS["users"][target]["salt"] = salt
         USERS["users"][target]["hash"] = hash_password(new_password, salt)
         if target != me:
-            for token in list(SESSIONS.keys()):
-                if SESSIONS[token]["username"] == target:
-                    SESSIONS.pop(token, None)
+            KICKED[target] = time.time() + SESSION_TTL
         save_users()
         self._json(200, {"ok": True})
 
@@ -1553,9 +1582,6 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {"error": "нужен ip"})
             return
         USERS.setdefault("bans", {})[ip] = {"at": time.time()}
-        for token in list(SESSIONS.keys()):
-            if SESSIONS[token]["ip"] == ip:
-                SESSIONS.pop(token, None)
         save_users()
         self._json(200, {"ok": True, "ip": ip})
 
