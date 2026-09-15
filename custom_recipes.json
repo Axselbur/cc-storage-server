@@ -252,5 +252,22 @@
     ],
     "auto_enabled": true,
     "auto_target": 128
+  },
+  {
+    "id": "custom:1789481148014",
+    "output": "create:copper_sheet",
+    "output_count": 1,
+    "method": "mechanism",
+    "ingredients": [
+      {
+        "item": "minecraft:copper_ingot",
+        "count": 1
+      }
+    ],
+    "auto_enabled": false,
+    "auto_target": 128,
+    "destination": "create_connected:item_silo_102",
+    "mechanism_input": "create:depot_9",
+    "mechanism_output": "create:depot_9"
   }
 ]
