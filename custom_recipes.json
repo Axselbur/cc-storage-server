@@ -114,5 +114,27 @@
     "destination": "create_connected:item_silo_102",
     "mechanism_input": "create:depot_9",
     "mechanism_output": "create:depot_9"
+  },
+  {
+    "id": "custom:1789453724765",
+    "output": "create:precision_mechanism",
+    "output_count": 1,
+    "method": "table",
+    "ingredients": [
+      {
+        "item": "create:cogwheel",
+        "count": 5
+      },
+      {
+        "item": "create:large_cogwheel",
+        "count": 5
+      },
+      {
+        "item": "minecraft:iron_nugget",
+        "count": 5
+      }
+    ],
+    "auto_enabled": false,
+    "auto_target": 64
   }
 ]
