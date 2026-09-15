@@ -119,7 +119,7 @@
     "id": "custom:1789453724765",
     "output": "create:precision_mechanism",
     "output_count": 1,
-    "method": "table",
+    "method": "mechanism",
     "ingredients": [
       {
         "item": "create:cogwheel",
@@ -135,6 +135,9 @@
       }
     ],
     "auto_enabled": false,
-    "auto_target": 64
+    "auto_target": 64,
+    "destination": "create_connected:item_silo_102",
+    "mechanism_input": "create:item_vault_13",
+    "mechanism_output": "create:depot_9"
   }
 ]
