@@ -230,5 +230,27 @@
     "destination": "create_connected:item_silo_102",
     "mechanism_input": "",
     "mechanism_output": ""
+  },
+  {
+    "id": "custom:1789465415042",
+    "output": "create_radar:guided_fuze",
+    "output_count": 1,
+    "method": "table",
+    "ingredients": [
+      {
+        "item": "create:electron_tube",
+        "count": 1
+      },
+      {
+        "item": "minecraft:redstone",
+        "count": 3
+      },
+      {
+        "item": "create:precision_mechanism",
+        "count": 1
+      }
+    ],
+    "auto_enabled": true,
+    "auto_target": 128
   }
 ]
