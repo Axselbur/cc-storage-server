@@ -134,7 +134,7 @@
         "count": 5
       }
     ],
-    "auto_enabled": false,
+    "auto_enabled": true,
     "auto_target": 64,
     "destination": "create_connected:item_silo_102",
     "mechanism_input": "create:item_vault_13",
