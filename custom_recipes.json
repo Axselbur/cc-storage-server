@@ -209,5 +209,24 @@
     "destination": "create_connected:item_silo_102",
     "mechanism_input": "create:depot_10",
     "mechanism_output": "create:depot_10"
+  },
+  {
+    "id": "custom:1789464866325",
+    "output": "create:electron_tube",
+    "output_count": 1,
+    "method": "table",
+    "ingredients": [
+      {
+        "item": "create:iron_sheet",
+        "count": 1
+      },
+      {
+        "item": "create:polished_rose_quartz",
+        "count": 1
+      }
+    ],
+    "auto_enabled": true,
+    "auto_target": 64,
+    "destination": "create_connected:item_silo_102"
   }
 ]
