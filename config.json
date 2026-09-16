@@ -14,5 +14,10 @@
   "auto_balance": true,
   "auto_balance_interval": 600,
   "vault_capacity": 103680,
-  "cannons": []
+  "cannons": [
+    {
+      "name": "create:depot",
+      "ammo": "createbigcannons:autocannon_cartridge"
+    }
+  ]
 }
