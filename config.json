@@ -20,7 +20,7 @@
       "ammo": "createbigcannons:autocannon_cartridge"
     },
     {
-      "name": "cannon_mount_2",
+      "name": "minecraft:hopper_3",
       "ammo": "createbigcannons:autocannon_cartridge"
     }
   ]
