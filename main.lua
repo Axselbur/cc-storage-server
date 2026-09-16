@@ -306,6 +306,12 @@ local function item_matches_spec(detail, base, markers)
         return false
     end
     local nbtStr = tostring(detail.nbt or "")
+    local hasMarkers = false
+    for _ in pairs(markers) do hasMarkers = true break end
+    if not hasMarkers then
+        -- написано БЕЗ компонентов -- нужен именно чистый предмет
+        return nbtStr == ""
+    end
     for marker in pairs(markers) do
         if not string.find(nbtStr, marker, 1, true) then
             return false

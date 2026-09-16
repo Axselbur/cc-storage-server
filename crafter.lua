@@ -199,11 +199,49 @@ local function scan_all_vaults()
 end
 
 -- ======================= ИНВЕНТАРЬ =======================
+-- Поддержка id с компонентами (1.20.5+): id[comp={...}].
+-- Правило строгое: написано БЕЗ компонентов -- нужен именно чистый
+-- предмет (без NBT); написано С компонентами -- обязательны все маркеры.
+local function parse_item_spec(spec)
+    local s = tostring(spec)
+    local base = s
+    local b = string.find(s, "[", 1, true)
+    if b then
+        base = string.sub(s, 1, b - 1)
+    end
+    local markers = {}
+    for token in string.gmatch(s, "[%w_]+:[%w_/]+") do
+        markers[token] = true
+    end
+    markers[base] = nil
+    return base, markers
+end
+
+local function item_matches_spec(detail, base, markers)
+    if not detail or detail.name ~= base then
+        return false
+    end
+    local nbtStr = tostring(detail.nbt or "")
+    local hasMarkers = false
+    for _ in pairs(markers) do hasMarkers = true break end
+    if not hasMarkers then
+        -- без компонентов: только "чистый" предмет
+        return nbtStr == ""
+    end
+    for marker in pairs(markers) do
+        if not string.find(nbtStr, marker, 1, true) then
+            return false
+        end
+    end
+    return true
+end
+
 local function count_item(id)
+    local base, markers = parse_item_spec(id)
     local total = 0
     for s = 1, 16 do
         local d = turtle.getItemDetail(s)
-        if d and d.name == id then
+        if d and item_matches_spec(d, base, markers) then
             total = total + d.count
         end
     end
@@ -213,11 +251,13 @@ end
 local function pull_from_inventory(inv, id, need)
     local ok, list = pcall(inv.list)
     if not ok or type(list) ~= "table" then return end
+    local base, markers = parse_item_spec(id)
     local turtle_name = current_turtle_name()
-    for slot, info in pairs(list) do
+    for slot in pairs(list) do
         if count_item(id) >= need then break end
-        if type(info) == "table" and info.name == id then
-            local take = math.min(need - count_item(id), info.count or 0)
+        local okd, det = pcall(inv.getItemDetail, slot)
+        if okd and item_matches_spec(det, base, markers) then
+            local take = math.min(need - count_item(id), det.count or 0)
             if take > 0 then
                 pcall(inv.pushItems, turtle_name, slot, take)
             end
@@ -240,9 +280,13 @@ end
 -- Набрать want предметов id ИМЕННО в слот to_slot (с проверкой предмета!)
 local function pull_into_slot(id, to_slot, want)
     local turtle_name = current_turtle_name()
+    local base, markers = parse_item_spec(id)
     local function have()
         local d = turtle.getItemDetail(to_slot)
-        return (d and d.name == id) and d.count or 0
+        if d and item_matches_spec(d, base, markers) then
+            return d.count
+        end
+        return 0
     end
     local cur = have()
     if cur >= want then return cur end
@@ -251,8 +295,9 @@ local function pull_into_slot(id, to_slot, want)
         if inv then
             local ok2, list = pcall(inv.list)
             if ok2 and type(list) == "table" then
-                for slot, info in pairs(list) do
-                    if type(info) == "table" and info.name == id then
+                for slot in pairs(list) do
+                    local okd, det = pcall(inv.getItemDetail, slot)
+                    if okd and item_matches_spec(det, base, markers) then
                         local ok3, n = pcall(inv.pushItems, turtle_name, slot, want - cur, to_slot)
                         n = (ok3 and tonumber(n)) or 0
                         cur = cur + n
