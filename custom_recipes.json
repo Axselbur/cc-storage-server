@@ -340,5 +340,24 @@
     "auto_enabled": true,
     "auto_target": 64,
     "destination": "create_connected:item_silo_102"
+  },
+  {
+    "id": "custom:1789579881666",
+    "output": "create:fluid_tank",
+    "output_count": 1,
+    "method": "table",
+    "ingredients": [
+      {
+        "item": "create:copper_sheet",
+        "count": 2
+      },
+      {
+        "item": "minecraft:barrel",
+        "count": 1
+      }
+    ],
+    "auto_enabled": true,
+    "auto_target": 64,
+    "destination": "create_connected:item_silo_102"
   }
 ]
