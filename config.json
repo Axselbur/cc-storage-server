@@ -18,6 +18,10 @@
     {
       "name": "cannon_mount_1",
       "ammo": "createbigcannons:autocannon_cartridge"
+    },
+    {
+      "name": "cannon_mount_2",
+      "ammo": "createbigcannons:autocannon_cartridge"
     }
   ]
 }
