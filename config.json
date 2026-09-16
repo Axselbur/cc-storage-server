@@ -14,5 +14,10 @@
   "auto_balance": true,
   "auto_balance_interval": 600,
   "vault_capacity": 103680,
-  "cannons": []
+  "cannons": [
+    {
+      "name": "cannon_mount_1",
+      "ammo": "createbigcannons:flak_autocannon_cartridge[createbigcannons:fuze={id:\"createbigcannons:proximity_fuze\"}]"
+    }
+  ]
 }
