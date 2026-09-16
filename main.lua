@@ -39,6 +39,7 @@ local CONFIG = {
     fallback_auto_balance = false,
     fallback_auto_balance_interval = 600,
     fallback_vault_capacity = 4096,
+    fallback_cannons = {},
 
     use_monitor = true,
     monitor_text_scale = 0.5,
@@ -259,6 +260,106 @@ local function logistics_pass(active_vaults)
     return moved
 end
 
+-- ======================= АВТОПУШКИ =======================
+-- Каждую пушку проверяем: есть патроны -- всё ок (раз в 30 сек),
+-- патроны начали расходоваться -- смотрим раз в 5 сек, пусто --
+-- заполняем по стаку, пока не упрётся (или не кончатся в вольтах).
+local function cfg_cannons()
+    local c = SERVER_CONFIG.cannons
+    if type(c) == "table" and #c > 0 then return c end
+    return CONFIG.fallback_cannons or {}
+end
+
+local cannonState = {}   -- name -> { nextCheck, lastCount, fast }
+
+local function find_slot(inv, id)
+    local ok, list = pcall(inv.list)
+    if not ok or type(list) ~= "table" then return nil end
+    for slot, item in pairs(list) do
+        if type(item) == "table" and item.name == id then
+            return slot
+        end
+    end
+    return nil
+end
+
+local function cannon_ammo_count(cannon, ammoId)
+    if not cannon then return nil end
+    local ok, list = pcall(cannon.list)
+    if not ok or type(list) ~= "table" then return nil end
+    local total = 0
+    for _, item in pairs(list) do
+        if type(item) == "table" and item.name == ammoId then
+            total = total + (item.count or 0)
+        end
+    end
+    return total
+end
+
+local function cannon_pass()
+    local cannons = cfg_cannons()
+    if #cannons == 0 then return 0 end
+    local now = os.epoch("utc")
+    local fed = 0
+
+    for _, c in ipairs(cannons) do
+        local st = cannonState[c.name] or { nextCheck = 0, lastCount = nil, fast = false }
+        cannonState[c.name] = st
+        if now < st.nextCheck then
+            -- ещё не пора смотреть
+        else
+            local cName = resolve_name(c.name) or c.name
+            local cannon = get_inventory(cName)
+            local count = cannon_ammo_count(cannon, c.ammo)
+
+            -- патроны начали пропадать -> быстрый режим
+            if count ~= nil and st.lastCount ~= nil and count < st.lastCount then
+                st.fast = true
+            elseif st.fast and count ~= nil and st.lastCount ~= nil and count >= st.lastCount then
+                st.fast = false
+            end
+            st.lastCount = count
+
+            local isEmpty = (count == nil) or (count <= 0)
+            if isEmpty then
+                -- заполняем по стаку, пока есть место и есть патроны в вольтах
+                local hadAmmo = false
+                local attempts = 0
+                while attempts < 64 do
+                    attempts = attempts + 1
+                    local vault, vName, vSlot = nil, nil, nil
+                    for _, vname in ipairs(active_vaults) do
+                        local inv = get_inventory(vname)
+                        if inv then
+                            local slot = find_slot(inv, c.ammo)
+                            if slot then
+                                vault, vName, vSlot = inv, vname, slot
+                                break
+                            end
+                        end
+                    end
+                    if not vault then break end
+                    hadAmmo = true
+                    local okp, m = pcall(vault.pushItems, cName, vSlot, 64)
+                    if not okp or not m or m <= 0 then break end
+                    fed = fed + m
+                end
+                if not hadAmmo then
+                    st.nextCheck = now + 30000   -- патронов в вольтах нет
+                else
+                    st.nextCheck = now + 5000    -- доливаем и смотрим чаще
+                end
+            elseif st.fast then
+                st.nextCheck = now + 5000
+            else
+                st.nextCheck = now + 30000
+            end
+        end
+    end
+
+    return fed
+end
+
 -- ======================= ОТПРАВКА НА СЕРВЕР =======================
 local function send_to_server(payload)
     return api_post("/api/items", payload)
@@ -477,6 +578,9 @@ local function main()
         local okL, moved = pcall(logistics_pass, active_vaults)
         lastLogistics = okL and (moved > 0 and ("moved " .. tostring(moved)) or "idle")
             or "error"
+
+        -- автопушки: внутри свой таймер (30 сек / 5 сек)
+        pcall(cannon_pass)
 
         -- полный цикл раз в scan_interval
         if tick % CONFIG.scan_interval == 0 then

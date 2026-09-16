@@ -248,7 +248,7 @@ header {
 .siloRow input { width: 90px; }
 
 /* ---------- изготовление (left-docked) ---------- */
-#craftModal {
+#craftModal, #cannonModal {
   position: fixed; left: 0; top: 0; bottom: 0;
   width: 600px; max-width: 92vw;
   background: var(--panel);
@@ -289,6 +289,7 @@ header {
     <button id="btnBalance">🔀 Выровнять</button>
     <span id="balanceStatus" class="conn"></span>
     <button id="btnCraft">➕ Изготовление</button>
+    <button id="btnCannons">🔫 Автопушки</button>
     <button id="btnSettings">⚙️ Настройки</button>
     <span id="userBadge" class="badge muted"></span>
     <button id="btnLogout" title="Выйти">⎋</button>
@@ -514,6 +515,23 @@ header {
     <button id="cmSave">Сохранить</button>
     <div id="cmMsg" class="muted" style="margin-top:8px;min-height:14px;font-size:12px;"></div>
   </div>
+</div>
+
+<div id="cannonModal" class="hidden">
+  <h2>🔫 Автопушки</h2>
+  <div id="cannonListBox"></div>
+  <div class="vrow">
+    <input type="text" id="newCannonName" placeholder="имя пушки (из peripherals)" style="flex:1;">
+    <input type="text" id="newCannonAmmo" placeholder="id патрона" style="width:190px;">
+    <button id="btnAddCannon">+ Добавить</button>
+  </div>
+  <div class="inghint">
+    ПК проверяет пушку раз в 30 сек. Если патроны начали расходоваться —
+    смотрит раз в 5 сек. Пусто — заполняет по стаку (64), пока не упрётся
+    или не кончатся патроны в вольтах.
+  </div>
+  <button id="btnSaveCannons">Сохранить</button>
+  <div id="cannonMsg" class="muted" style="margin-top:8px;min-height:14px;font-size:12px;"></div>
 </div>
 
 <script>
@@ -1239,6 +1257,61 @@ header {
     $("balanceStatus").textContent = txt;
   }
 
+  // ---------------- автопушки ----------------
+  var draftCannons = [];
+
+  function openCannons() {
+    $("cannonModal").classList.remove("hidden");
+    $("craftModal").classList.add("hidden");
+    $("cannonMsg").textContent = "";
+    api("/api/config").then(function (cfg) {
+      draftCannons = (cfg.cannons || []).map(function (c) {
+        return { name: c.name || "", ammo: c.ammo || "" };
+      });
+      renderCannonList();
+    }).catch(function () {
+      draftCannons = [];
+      renderCannonList();
+    });
+  }
+
+  function renderCannonList() {
+    var box = $("cannonListBox");
+    box.innerHTML = "";
+    draftCannons.forEach(function (c, idx) {
+      var row = document.createElement("div");
+      row.className = "vrow";
+      row.innerHTML =
+        '<input class="cName" placeholder="имя пушки" value="' + esc(c.name) + '" style="flex:1;">' +
+        '<input class="cAmmo" placeholder="id патрона" value="' + esc(c.ammo) + '" style="width:190px;">' +
+        '<button class="cDel">✕</button>';
+      var nameEl = row.querySelector(".cName");
+      var ammoEl = row.querySelector(".cAmmo");
+      nameEl.addEventListener("input", function () { c.name = nameEl.value.trim(); });
+      ammoEl.addEventListener("input", function () { c.ammo = ammoEl.value.trim(); });
+      row.querySelector(".cDel").addEventListener("click", function () {
+        draftCannons.splice(idx, 1);
+        renderCannonList();
+      });
+      box.appendChild(row);
+    });
+    if (!draftCannons.length) {
+      box.innerHTML = '<div class="muted" style="padding:10px;">Пушек пока нет.</div>';
+    }
+  }
+
+  function saveCannons() {
+    var cannons = draftCannons.filter(function (c) { return c.name && c.ammo; }).map(function (c) {
+      return { name: c.name, ammo: c.ammo };
+    });
+    api("/api/config", { method: "POST", body: { cannons: cannons } })
+      .then(function (r) {
+        config = r.config || config;
+        $("cannonMsg").textContent = "✅ Сохранено";
+      })
+      .catch(function (e) { $("cannonMsg").textContent = "Ошибка: " + e.message; });
+  }
+
   // ---------------- refresh ----------------
   async function refresh() {
     try { state = await api("/api/state"); } catch (e) { state = null; }
@@ -1265,6 +1338,17 @@ header {
   });
 
   $("btnCraft").addEventListener("click", openCraftModal);
+  $("btnCannons").addEventListener("click", openCannons);
+  $("btnAddCannon").addEventListener("click", function () {
+    var name = $("newCannonName").value.trim();
+    var ammo = $("newCannonAmmo").value.trim();
+    if (!name || !ammo) { alert("Введи имя пушки и id патрона"); return; }
+    draftCannons.push({ name: name, ammo: ammo });
+    $("newCannonName").value = "";
+    $("newCannonAmmo").value = "";
+    renderCannonList();
+  });
+  $("btnSaveCannons").addEventListener("click", saveCannons);
   $("cmClose").addEventListener("click", closeCraftModal);
   $("cmTabList").addEventListener("click", function () { switchCraftTab("list"); });
   $("cmTabAdd").addEventListener("click", function () { openCraftAdd(); });

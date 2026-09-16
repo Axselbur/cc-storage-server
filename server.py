@@ -42,6 +42,7 @@ CONFIG_DEFAULTS = {
     "auto_balance": False,   # keep vaults evenly filled (включается вручную на сайте)
     "auto_balance_interval": 600,  # seconds between auto-balance runs
     "vault_capacity": 4096,  # assumed items per vault (for the monitor fill bars)
+    "cannons": [],           # автопушки: [{"name", "ammo"}]
 }
 
 LOCK = threading.RLock()
@@ -1483,7 +1484,20 @@ class Handler(BaseHTTPRequestHandler):
                             continue
                         v = data[k]
                         default = CONFIG_DEFAULTS[k]
-                        if isinstance(default, list):
+                        if k == "cannons":
+                            out = []
+                            if isinstance(v, list):
+                                for c in v:
+                                    if not isinstance(c, dict):
+                                        continue
+                                    name = str(c.get("name") or "").strip()
+                                    if not name:
+                                        continue
+                                    ammo = str(c.get("ammo") or "").strip()
+                                    if ammo:
+                                        out.append({"name": name, "ammo": ammo})
+                            CONFIG[k] = out
+                        elif isinstance(default, list):
                             CONFIG[k] = [str(x).strip() for x in v
                                          if str(x).strip()] if isinstance(v, list) else []
                         elif isinstance(default, bool):
