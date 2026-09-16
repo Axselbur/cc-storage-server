@@ -302,5 +302,24 @@
     "auto_target": 192,
     "mechanism_input": "create:depot_10",
     "mechanism_output": "create:depot_10"
+  },
+  {
+    "id": "custom:1789576029655",
+    "output": "createbigcannons:flak_autocannon_round[createbigcannons:fuze={id:\"create_radar:guided_fuze\"}]",
+    "output_count": 1,
+    "method": "table",
+    "ingredients": [
+      {
+        "item": "createbigcannons:flak_autocannon_round",
+        "count": 1
+      },
+      {
+        "item": "create_radar:guided_fuze",
+        "count": 1
+      }
+    ],
+    "auto_enabled": true,
+    "auto_target": 128,
+    "destination": "create_connected:item_silo_102"
   }
 ]
