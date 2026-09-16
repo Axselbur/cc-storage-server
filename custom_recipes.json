@@ -377,5 +377,26 @@
     ],
     "auto_enabled": true,
     "auto_target": 64
+  },
+  {
+    "id": "custom:1789593003305",
+    "output": "createbigcannons:filled_autocannon_cartridge",
+    "output_count": 1,
+    "method": "mechanism",
+    "ingredients": [
+      {
+        "item": "create:copper_sheet",
+        "count": 3
+      },
+      {
+        "item": "minecraft:gunpowder",
+        "count": 3
+      }
+    ],
+    "auto_enabled": true,
+    "auto_target": 128,
+    "destination": "create_connected:item_silo_102",
+    "mechanism_input": "create:item_vault_14",
+    "mechanism_output": "minecraft:barrel_5"
   }
 ]
