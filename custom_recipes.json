@@ -397,6 +397,6 @@
     "auto_target": 128,
     "destination": "create_connected:item_silo_102",
     "mechanism_input": "create:item_vault_14",
-    "mechanism_output": "minecraft:barrel_5"
+    "mechanism_output": "minecraft:barrel_6"
   }
 ]
