@@ -228,6 +228,7 @@ local function cannon_pass()
             local isEmpty = (count == nil) or (count <= 0)
             if isEmpty then
                 local hadAmmo = false
+                local pushedThis = 0
                 local attempts = 0
                 while attempts < 64 do
                     attempts = attempts + 1
@@ -244,15 +245,29 @@ local function cannon_pass()
                     end
                     if not vault then break end
                     hadAmmo = true
+                    -- основное направление: вольт толкает в пушку
                     local okp, m = pcall(vault.pushItems, cName, vSlot, 64)
-                    if not okp or not m or m <= 0 then break end
-                    fed = fed + m
+                    if okp and m and m > 0 then
+                        pushedThis = pushedThis + m
+                    else
+                        -- обратное направление: пушка сама тянет из вольта
+                        local okc, mc = pcall(cannon.pullItems, vName, vSlot, 64)
+                        if okc and mc and mc > 0 then
+                            pushedThis = pushedThis + mc
+                        else
+                            break
+                        end
+                    end
                 end
+                fed = fed + pushedThis
                 if not hadAmmo then
                     st.status = "NO AMMO IN VAULTS"
                     st.nextCheck = now + 30000
-                else
+                elseif pushedThis > 0 then
                     st.status = "feeding"
+                    st.nextCheck = now + 5000
+                else
+                    st.status = "PUSH FAILED"
                     st.nextCheck = now + 5000
                 end
             elseif st.fast then
