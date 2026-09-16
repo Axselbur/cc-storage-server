@@ -21,7 +21,7 @@
     },
     {
       "name": "cannon_mount_2",
-      "ammo": "createbigcannons:flak_autocannon_cartridge[createbigcannons:fuze={id:\"createbigcannons:proximity_fuze\"}]"
+      "ammo": "createbigcannons:autocannon_cartridge"
     }
   ]
 }
