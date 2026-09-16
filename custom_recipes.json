@@ -251,7 +251,10 @@
       }
     ],
     "auto_enabled": true,
-    "auto_target": 128
+    "auto_target": 512,
+    "destination": null,
+    "mechanism_input": "",
+    "mechanism_output": ""
   },
   {
     "id": "custom:1789481148014",
