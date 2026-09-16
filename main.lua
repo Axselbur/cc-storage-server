@@ -283,18 +283,73 @@ local function find_slot(inv, id)
     return nil
 end
 
-local function cannon_ammo_count(cannon, ammoId)
+-- ======================= АВТОПУШКИ =======================
+-- Патроны могут быть с компонентами:
+-- createbigcannons:flak_autocannon_cartridge[createbigcannons:fuze={id:"..."}]
+-- Сравниваем базовый id + ищем "маркеры" (id компонентов) в NBT предмета.
+local function parse_item_spec(spec)
+    local base = tostring(spec)
+    local b = string.find(base, "[", 1, true)
+    if b then
+        base = string.sub(base, 1, b - 1)
+    end
+    local markers = {}
+    for token in string.gmatch(tostring(spec), "[%w_]+:[%w_/]+") do
+        markers[token] = true
+    end
+    markers[base] = nil
+    return base, markers
+end
+
+local function item_matches_spec(detail, base, markers)
+    if not detail or detail.name ~= base then
+        return false
+    end
+    local nbtStr = tostring(detail.nbt or "")
+    for marker in pairs(markers) do
+        if not string.find(nbtStr, marker, 1, true) then
+            return false
+        end
+    end
+    return true
+end
+
+local function find_slot_spec(inv, base, markers)
+    local ok, list = pcall(inv.list)
+    if not ok or type(list) ~= "table" then return nil end
+    for slot in pairs(list) do
+        local ok2, det = pcall(inv.getItemDetail, slot)
+        if ok2 and item_matches_spec(det, base, markers) then
+            return slot
+        end
+    end
+    return nil
+end
+
+local function cannon_ammo_count(cannon, base, markers)
     if not cannon then return nil end
     local ok, list = pcall(cannon.list)
     if not ok or type(list) ~= "table" then return nil end
     local total = 0
-    for _, item in pairs(list) do
-        if type(item) == "table" and item.name == ammoId then
-            total = total + (item.count or 0)
+    for slot in pairs(list) do
+        local ok2, det = pcall(cannon.getItemDetail, slot)
+        if ok2 and item_matches_spec(det, base, markers) then
+            total = total + (det.count or 0)
         end
     end
     return total
 end
+
+-- Каждую пушку проверяем: есть патроны -- всё ок (раз в 30 сек),
+-- патроны начали расходоваться -- смотрим раз в 5 сек, пусто --
+-- заполняем по стаку, пока не упрётся (или не кончатся в вольтах).
+local function cfg_cannons()
+    local c = SERVER_CONFIG.cannons
+    if type(c) == "table" and #c > 0 then return c end
+    return CONFIG.fallback_cannons or {}
+end
+
+local cannonState = {}   -- name -> { nextCheck, lastCount, fast }
 
 local function cannon_pass()
     local cannons = cfg_cannons()
@@ -310,7 +365,8 @@ local function cannon_pass()
         else
             local cName = resolve_name(c.name) or c.name
             local cannon = get_inventory(cName)
-            local count = cannon_ammo_count(cannon, c.ammo)
+            local base, markers = parse_item_spec(c.ammo)
+            local count = cannon_ammo_count(cannon, base, markers)
 
             -- патроны начали пропадать -> быстрый режим
             if count ~= nil and st.lastCount ~= nil and count < st.lastCount then
@@ -331,7 +387,7 @@ local function cannon_pass()
                     for _, vname in ipairs(active_vaults) do
                         local inv = get_inventory(vname)
                         if inv then
-                            local slot = find_slot(inv, c.ammo)
+                            local slot = find_slot_spec(inv, base, markers)
                             if slot then
                                 vault, vName, vSlot = inv, vname, slot
                                 break

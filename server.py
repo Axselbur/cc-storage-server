@@ -387,6 +387,17 @@ def resolve_tag(tag):
     return out
 
 
+def _base_id(item):
+    """Отрезаем компоненты (1.20.5+): id[comp=...] / id{...} -> базовый id."""
+    item = str(item)
+    i = item.find("[")
+    if i == -1:
+        i = item.find("{")
+    if i != -1:
+        return item[:i]
+    return item
+
+
 # ---------------- config / state files ----------------
 def load_config():
     global CONFIG
@@ -739,7 +750,9 @@ class _Planner(object):
         return []
 
     def recipes_for(self, item):
-        rs = [r for r in RECIPES_BY_RESULT.get(item, []) if _is_craftable(r)]
+        # сначала точный id (в т.ч. с компонентами), затем базовый
+        rs = RECIPES_BY_RESULT.get(item) or RECIPES_BY_RESULT.get(_base_id(item), [])
+        rs = [r for r in rs if _is_craftable(r)]
         rs.sort(key=lambda r: 0 if r.get("custom") else 1)  # custom first
         return rs[:10]
 
@@ -1025,7 +1038,8 @@ def _replan_order(item, count):
     NOTE: existing stock of the ordered item is intentionally ignored --
     the order always crafts the requested amount on top of the stock."""
     stock = dict(STATE.get("items", {}))
-    if not any(_is_craftable(r) for r in RECIPES_BY_RESULT.get(item, [])):
+    if not any(_is_craftable(r) for r in
+               (RECIPES_BY_RESULT.get(item) or RECIPES_BY_RESULT.get(_base_id(item), []))):
         return None
 
     planner = _Planner(stock)
@@ -1108,7 +1122,7 @@ def _auto_maintain_tick():
         item = cr.get("output")
         if target <= 0 or not item:
             continue
-        have = stock.get(item, 0)
+        have = stock.get(_base_id(item), 0)
         if have >= target:
             continue
         # не спамим: пропускаем, если уже есть активный заказ или
@@ -1316,7 +1330,7 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/recipes":
                 if not self._require_login():
                     return
-                item = (qs.get("item") or [""])[0]
+                item = _base_id((qs.get("item") or [""])[0])
                 self._json(200, {
                     "recipes": RECIPES_BY_RESULT.get(item, [])[:60],
                     "usage": RECIPES_BY_INPUT.get(item, [])[:60],
@@ -1325,7 +1339,7 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/texture":
                 if not self._require_login():
                     return
-                item = (qs.get("id") or [""])[0]
+                item = _base_id((qs.get("id") or [""])[0])
                 fp = TEXTURE_INDEX.get(item)
                 if fp and os.path.isfile(fp):
                     with open(fp, "rb") as fh:
