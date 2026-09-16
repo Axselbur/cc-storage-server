@@ -16,10 +16,6 @@
   "vault_capacity": 103680,
   "cannons": [
     {
-      "name": "cannon_mount_1",
-      "ammo": "createbigcannons:autocannon_cartridge"
-    },
-    {
       "name": "minecraft:hopper_3",
       "ammo": "createbigcannons:autocannon_cartridge"
     }
