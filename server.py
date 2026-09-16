@@ -1411,6 +1411,9 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/crafter.lua":
                 self._serve_file("crafter.lua", "text/plain; charset=utf-8")
 
+            elif path == "/cannon.lua":
+                self._serve_file("cannon.lua", "text/plain; charset=utf-8")
+
             else:
                 self._json(404, {"error": "not found"})
         except (BrokenPipeError, ConnectionResetError):
