@@ -317,7 +317,7 @@ local function wline(s, w)
     print("")
 end
 
-local function draw_screen(configOk)
+local function draw_screen(configOk, errText)
     term.clear()
     term.setCursorPos(1, 1)
     local w, _ = term.getSize()
@@ -328,6 +328,9 @@ local function draw_screen(configOk)
         local st = cannonState[c.name]
         local short = tostring(c.name):gsub("^.*:", "")
         wline(" " .. short .. ": " .. tostring(st and st.status or "?"), w)
+    end
+    if errText then
+        wline("ERROR: " .. tostring(errText), w)
     end
 end
 
@@ -340,6 +343,7 @@ local function main()
     setup_monitor()
 
     local configOk = false
+    local cannonError = nil
     local iter = 0
     while true do
         iter = iter + 1
@@ -347,8 +351,9 @@ local function main()
             configOk = fetch_server_config()
         end
         heartbeat()
-        pcall(cannon_pass)
-        draw_screen(configOk)
+        local okc, errc = pcall(cannon_pass)
+        cannonError = okc and nil or tostring(errc)
+        draw_screen(configOk, cannonError)
         os.sleep(1)
     end
 end
