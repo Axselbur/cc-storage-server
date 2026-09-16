@@ -245,14 +245,18 @@ local function cannon_pass()
                     end
                     if not vault then break end
                     hadAmmo = true
-                    -- основное направление: вольт толкает в пушку
+                    -- основное направление: вольт толкает в пушку/буфер
                     local okp, m = pcall(vault.pushItems, cName, vSlot, 64)
                     if okp and m and m > 0 then
                         pushedThis = pushedThis + m
                     else
                         -- обратное направление: пушка сама тянет из вольта
-                        local okc, mc = pcall(cannon.pullItems, vName, vSlot, 64)
-                        if okc and mc and mc > 0 then
+                        local mc = 0
+                        if cannon and cannon.pullItems then
+                            local okc, mcc = pcall(cannon.pullItems, vName, vSlot, 64)
+                            if okc and mcc and mcc > 0 then mc = mcc end
+                        end
+                        if mc > 0 then
                             pushedThis = pushedThis + mc
                         else
                             break
