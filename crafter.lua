@@ -29,6 +29,12 @@ local CONFIG = {
     fallback_storage = {},  -- вольты, если сервер не отдал конфиг
     fallback_turtle_name = "",
 
+    -- Роль черепашки (распределение нагрузки, 1 тик = 1 команда):
+    --   "table"      -- только верстачные заказы (лёгкая)
+    --   "mechanism"  -- заказы со станками (тяжёлая, одна черепашка)
+    --   "all"        -- любые заказы
+    role = "table",
+
     use_monitor = true,
     monitor_text_scale = 0.5,
 }
@@ -252,14 +258,23 @@ local function pull_from_inventory(inv, id, need)
     local ok, list = pcall(inv.list)
     if not ok or type(list) ~= "table" then return end
     local base, markers = parse_item_spec(id)
+    local strict = string.find(tostring(id), "[", 1, true) ~= nil
     local turtle_name = current_turtle_name()
-    for slot in pairs(list) do
+    for slot, info in pairs(list) do
         if count_item(id) >= need then break end
-        local okd, det = pcall(inv.getItemDetail, slot)
-        if okd and item_matches_spec(det, base, markers) then
-            local take = math.min(need - count_item(id), det.count or 0)
-            if take > 0 then
-                pcall(inv.pushItems, turtle_name, slot, take)
+        -- быстрый путь: сначала имя из list(), getItemDetail только
+        -- для id с компонентами (иначе лаги на больших силосах)
+        if type(info) == "table" and info.name == base then
+            local match = true
+            if strict then
+                local okd, det = pcall(inv.getItemDetail, slot)
+                match = okd and item_matches_spec(det, base, markers)
+            end
+            if match then
+                local take = math.min(need - count_item(id), info.count or 0)
+                if take > 0 then
+                    pcall(inv.pushItems, turtle_name, slot, take)
+                end
             end
         end
     end
@@ -290,20 +305,28 @@ local function pull_into_slot(id, to_slot, want)
     end
     local cur = have()
     if cur >= want then return cur end
+    local strict = string.find(tostring(id), "[", 1, true) ~= nil
     for _, vault_name in ipairs(activeVaults) do
         local inv = wrap_storage(vault_name)
         if inv then
             local ok2, list = pcall(inv.list)
             if ok2 and type(list) == "table" then
-                for slot in pairs(list) do
-                    local okd, det = pcall(inv.getItemDetail, slot)
-                    if okd and item_matches_spec(det, base, markers) then
-                        local ok3, n = pcall(inv.pushItems, turtle_name, slot, want - cur, to_slot)
-                        n = (ok3 and tonumber(n)) or 0
-                        cur = cur + n
-                        if cur >= want then return cur end
-                        if n == 0 and cur > 0 then
-                            return cur  -- слот упёрся в лимит стака
+                for slot, info in pairs(list) do
+                    -- быстрый путь: имя из list(), детали только для компонентов
+                    if type(info) == "table" and info.name == base then
+                        local match = true
+                        if strict then
+                            local okd, det = pcall(inv.getItemDetail, slot)
+                            match = okd and item_matches_spec(det, base, markers)
+                        end
+                        if match then
+                            local ok3, n = pcall(inv.pushItems, turtle_name, slot, want - cur, to_slot)
+                            n = (ok3 and tonumber(n)) or 0
+                            cur = cur + n
+                            if cur >= want then return cur end
+                            if n == 0 and cur > 0 then
+                                return cur  -- слот упёрся в лимит стака
+                            end
                         end
                     end
                 end
@@ -782,7 +805,8 @@ local function main()
             print("или проверь проводную сеть!")
             os.sleep(5)
         else
-            local data = api_get("/api/orders/next")
+            local data = api_get("/api/orders/next"
+                .. ((CONFIG.role ~= "all") and ("?type=" .. CONFIG.role) or ""))
             if data and data.order then
                 term.clear()
                 term.setCursorPos(1, 1)

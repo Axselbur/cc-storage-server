@@ -162,10 +162,16 @@ end
 local function find_slot_spec(inv, base, markers)
     local ok, list = pcall(inv.list)
     if not ok or type(list) ~= "table" then return nil end
-    for slot in pairs(list) do
-        local ok2, det = pcall(inv.getItemDetail, slot)
-        if ok2 and item_matches_spec(det, base, markers) then
-            return slot
+    for slot, info in pairs(list) do
+        if type(info) == "table" and info.name == base then
+            local match = true
+            if next(markers) ~= nil then
+                local ok2, det = pcall(inv.getItemDetail, slot)
+                match = ok2 and item_matches_spec(det, base, markers)
+            end
+            if match then
+                return slot
+            end
         end
     end
     return nil
@@ -176,10 +182,16 @@ local function cannon_ammo_count(cannon, base, markers)
     local ok, list = pcall(cannon.list)
     if not ok or type(list) ~= "table" then return nil end
     local total = 0
-    for slot in pairs(list) do
-        local ok2, det = pcall(cannon.getItemDetail, slot)
-        if ok2 and item_matches_spec(det, base, markers) then
-            total = total + (det.count or 0)
+    for slot, info in pairs(list) do
+        if type(info) == "table" and info.name == base then
+            local match = true
+            if next(markers) ~= nil then
+                local ok2, det = pcall(cannon.getItemDetail, slot)
+                match = ok2 and item_matches_spec(det, base, markers)
+            end
+            if match then
+                total = total + (info.count or 0)
+            end
         end
     end
     return total

@@ -1368,15 +1368,22 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/orders/next":
                 if not self._require_device_or_login():
                     return
+                want_type = (qs.get("type") or [""])[0]
                 with LOCK:
                     CRAFTER_STATE["last_seen"] = time.time()
                     order = None
                     for o in ORDERS:
-                        if o.get("status") == "queued":
-                            o["status"] = "crafting"
-                            order = o
-                            save_orders()
-                            break
+                        if o.get("status") != "queued":
+                            continue
+                        otype = "mechanism" if any(
+                            s.get("method") == "mechanism" for s in (o.get("steps") or [])
+                        ) else "table"
+                        if want_type and otype != want_type:
+                            continue
+                        o["status"] = "crafting"
+                        order = o
+                        save_orders()
+                        break
                 self._json(200, {"order": order})
 
             elif path == "/api/custom-recipes":
