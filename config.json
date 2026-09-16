@@ -18,6 +18,10 @@
     {
       "name": "minecraft:hopper_4",
       "ammo": "createbigcannons:autocannon_cartridge"
+    },
+    {
+      "name": "minecraft:hopper_5",
+      "ammo": "createbigcannons:autocannon_cartridge"
     }
   ]
 }
