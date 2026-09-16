@@ -78,7 +78,7 @@
       }
     ],
     "auto_enabled": true,
-    "auto_target": 64,
+    "auto_target": 256,
     "destination": null,
     "mechanism_input": "",
     "mechanism_output": ""
