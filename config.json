@@ -16,7 +16,7 @@
   "vault_capacity": 103680,
   "cannons": [
     {
-      "name": "create:depot",
+      "name": "create:depot_11",
       "ammo": "createbigcannons:autocannon_cartridge"
     }
   ]
