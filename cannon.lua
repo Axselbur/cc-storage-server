@@ -342,15 +342,22 @@ local function main()
     print("Server: " .. CONFIG.server_url)
     setup_monitor()
 
-    local configOk = false
+    local configOk = fetch_server_config()
     local cannonError = nil
     local iter = 0
+    local lastBeat = 0
     while true do
         iter = iter + 1
         if iter % 4 == 1 then
             configOk = fetch_server_config()
         end
-        heartbeat()
+        -- heartbeat раз в 30 секунд, а не каждую секунду
+        -- (1 тик = 1 команда: частый HTTP сам создаёт лаги)
+        local nowMs = os.epoch("utc")
+        if nowMs - lastBeat > 30000 then
+            heartbeat()
+            lastBeat = nowMs
+        end
         local okc, errc = pcall(cannon_pass)
         cannonError = okc and nil or tostring(errc)
         draw_screen(configOk, cannonError)
