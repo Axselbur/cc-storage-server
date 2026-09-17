@@ -416,5 +416,19 @@
     "auto_enabled": true,
     "auto_target": 512,
     "destination": "create_connected:item_silo_102"
+  },
+  {
+    "id": "custom:1789607254172",
+    "output": "minecraft:oak_slab",
+    "output_count": 6,
+    "method": "table",
+    "ingredients": [
+      {
+        "item": "minecraft:oak_planks",
+        "count": 3
+      }
+    ],
+    "auto_enabled": true,
+    "auto_target": 256
   }
 ]
