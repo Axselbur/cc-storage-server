@@ -389,7 +389,7 @@
     "ingredients": [
       {
         "item": "create:copper_sheet",
-        "count": 3
+        "count": 1
       },
       {
         "item": "minecraft:gunpowder",
