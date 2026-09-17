@@ -401,5 +401,20 @@
     "destination": "create_connected:item_silo_102",
     "mechanism_input": "create:item_vault_17",
     "mechanism_output": "minecraft:barrel_7"
+  },
+  {
+    "id": "custom:1789607223342",
+    "output": "minecraft:oak_planks",
+    "output_count": 4,
+    "method": "table",
+    "ingredients": [
+      {
+        "item": "minecraft:oak_log",
+        "count": 1
+      }
+    ],
+    "auto_enabled": true,
+    "auto_target": 512,
+    "destination": "create_connected:item_silo_102"
   }
 ]
