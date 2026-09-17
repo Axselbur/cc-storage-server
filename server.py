@@ -1126,11 +1126,11 @@ def _auto_maintain_tick():
         if have >= target:
             continue
         # не спамим: пропускаем, если уже есть активный заказ или
-        # недавний (10 мин) провал по этому предмету
+        # недавний (1 минута) провал по этому предмету
         if any(o.get("item") == item and (
                 o.get("status") in ("queued", "crafting")
                 or (o.get("status") == "failed"
-                    and time.time() - (o.get("created_at") or 0) < 600))
+                    and time.time() - (o.get("created_at") or 0) < 60))
                for o in orders):
             continue
         need = target - have
@@ -1161,7 +1161,7 @@ def auto_maintain_loop():
         try:
             _auto_maintain_tick()
             tick += 1
-            if tick % 6 == 0:  # каждые ~3 минуты
+            if tick % 2 == 0:  # каждые ~1 минуту
                 _heal_stale_orders()
         except Exception as e:
             log("auto-maintain error: %s" % e)
