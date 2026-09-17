@@ -5,7 +5,12 @@
     "create_connected:item_silo_104",
     "create_connected:item_silo_105",
     "create_connected:item_silo_106",
-    "create_connected:item_silo_107"
+    "create_connected:item_silo_107",
+    "create_connected:item_silo_198",
+    "create_connected:item_silo_199",
+    "create_connected:item_silo_200",
+    "create_connected:item_silo_201",
+    "create_connected:item_silo_202"
   ],
   "turtle_name": "",
   "packagers": [],
