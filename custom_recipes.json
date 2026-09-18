@@ -430,5 +430,23 @@
     ],
     "auto_enabled": true,
     "auto_target": 256
+  },
+  {
+    "id": "custom:1789731767506",
+    "output": "create:andesite_alloy",
+    "output_count": 1,
+    "method": "table",
+    "ingredients": [
+      {
+        "item": "minecraft:andesite",
+        "count": 2
+      },
+      {
+        "item": "minecraft:iron_nugget",
+        "count": 2
+      }
+    ],
+    "auto_enabled": true,
+    "auto_target": 256
   }
 ]
