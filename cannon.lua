@@ -198,7 +198,7 @@ local function cannon_ammo_count(cannon, base, markers)
 end
 
 -- ======================= КОРМЛЕНИЕ =======================
-local cannonState = {}   -- name -> { nextCheck, lastCount, fast, status }
+local cannonState = {}   -- name -> { nextCheck, status }
 
 local function cannon_pass()
     local cannons = cfg_cannons()
@@ -207,78 +207,65 @@ local function cannon_pass()
     local fed = 0
 
     for _, c in ipairs(cannons) do
-        local st = cannonState[c.name] or
-            { nextCheck = 0, lastCount = nil, fast = false, status = "?" }
+        local st = cannonState[c.name] or { nextCheck = 0, status = "?" }
         cannonState[c.name] = st
         if now < st.nextCheck then
-            -- ещё не пора
+            -- ещё не пора смотреть
         else
             local cName = resolve_name(c.name) or c.name
             local cannon = get_inventory(cName)
             local base, markers = parse_item_spec(c.ammo)
-            local count = cannon_ammo_count(cannon, base, markers)
 
-            if count ~= nil and st.lastCount ~= nil and count < st.lastCount then
-                st.fast = true
-            elseif st.fast and count ~= nil and st.lastCount ~= nil and count >= st.lastCount then
-                st.fast = false
-            end
-            st.lastCount = count
-
-            local isEmpty = (count == nil) or (count <= 0)
-            if isEmpty then
-                local hadAmmo = false
-                local pushedThis = 0
-                local attempts = 0
-                while attempts < 64 do
-                    attempts = attempts + 1
-                    local vault, vName, vSlot = nil, nil, nil
-                    for _, vname in ipairs(cfg_vaults()) do
-                        local inv = get_inventory(vname)
-                        if inv then
-                            local slot = find_slot_spec(inv, base, markers)
-                            if slot then
-                                vault, vName, vSlot = inv, vname, slot
-                                break
-                            end
-                        end
-                    end
-                    if not vault then break end
-                    hadAmmo = true
-                    -- основное направление: вольт толкает в пушку/буфер
-                    local okp, m = pcall(vault.pushItems, cName, vSlot, 64)
-                    if okp and m and m > 0 then
-                        pushedThis = pushedThis + m
-                    else
-                        -- обратное направление: пушка сама тянет из вольта
-                        local mc = 0
-                        if cannon and cannon.pullItems then
-                            local okc, mcc = pcall(cannon.pullItems, vName, vSlot, 64)
-                            if okc and mcc and mcc > 0 then mc = mcc end
-                        end
-                        if mc > 0 then
-                            pushedThis = pushedThis + mc
-                        else
+            -- ДОЛИВАЕМ ДО УПОРА каждый раз (не только когда пусто):
+            -- толкаем по стаку, пока есть место. Если пушка стреляет и
+            -- буфер подъедается -- долив продолжается раз в 5 сек,
+            -- полный буфер -- проверяем раз в 30 сек.
+            local hadAmmo = false
+            local pushedThis = 0
+            local attempts = 0
+            while attempts < 64 do
+                attempts = attempts + 1
+                local vault, vName, vSlot = nil, nil, nil
+                for _, vname in ipairs(cfg_vaults()) do
+                    local inv = get_inventory(vname)
+                    if inv then
+                        local slot = find_slot_spec(inv, base, markers)
+                        if slot then
+                            vault, vName, vSlot = inv, vname, slot
                             break
                         end
                     end
                 end
-                fed = fed + pushedThis
-                if not hadAmmo then
-                    st.status = "NO AMMO IN VAULTS"
-                    st.nextCheck = now + 30000
-                elseif pushedThis > 0 then
-                    st.status = "feeding"
-                    st.nextCheck = now + 5000
+                if not vault then break end
+                hadAmmo = true
+                -- основное направление: вольт толкает в пушку/буфер
+                local okp, m = pcall(vault.pushItems, cName, vSlot, 64)
+                if okp and m and m > 0 then
+                    pushedThis = pushedThis + m
                 else
-                    st.status = "PUSH FAILED"
-                    st.nextCheck = now + 5000
+                    -- обратное направление: пушка сама тянет из вольта
+                    local mc = 0
+                    if cannon and cannon.pullItems then
+                        local okc, mcc = pcall(cannon.pullItems, vName, vSlot, 64)
+                        if okc and mcc and mcc > 0 then mc = mcc end
+                    end
+                    if mc > 0 then
+                        pushedThis = pushedThis + mc
+                    else
+                        break  -- полный (или не принимает)
+                    end
                 end
-            elseif st.fast then
-                st.status = "firing"
+            end
+            fed = fed + pushedThis
+
+            if not hadAmmo then
+                st.status = "NO AMMO IN VAULTS"
+                st.nextCheck = now + 30000
+            elseif pushedThis > 0 then
+                st.status = "topping up"
                 st.nextCheck = now + 5000
             else
-                st.status = "ok (" .. tostring(count) .. ")"
+                st.status = "full"
                 st.nextCheck = now + 30000
             end
         end
